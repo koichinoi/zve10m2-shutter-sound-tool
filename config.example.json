@@ -1,0 +1,7 @@
+{
+  "python": "D:/camera-env/.venv/Scripts/python.exe",
+  "research": "D:/camera-work/work/firmware_research",
+  "ffmpeg": "D:/tools/ffmpeg.exe",
+  "toolkit": "D:/camera-env/ZVE10M2_sound_service_probe_v0.1",
+  "zig": "D:/tools/zig/zig.exe"
+}

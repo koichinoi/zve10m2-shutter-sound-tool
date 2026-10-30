@@ -1,0 +1,17 @@
+{
+  "version": "0.2",
+  "date": "2026-10-30",
+  "camera_io": false,
+  "factory_hardware_verified": false,
+  "factory_host_test_methods": 8,
+  "regression_test_methods": 8,
+  "bank_native_cases": 294,
+  "factory_app_native_cases": 16,
+  "reinstall_app_native_cases": 18,
+  "source_sha256": {
+    "backend.py": "3bba0266705ab331151fe5fc6184a20ca89654cd5a3bab2e1a5930019add1c85",
+    "factory_sound.py": "84ef84c64bd55b3b0d3246fa3500c7ad59be47ed2c21ac628ca63b30f293877d",
+    "gui.py": "1555c2c49f92dc22ab8516110a9ce9d0b76f0158f53047eced016fd25f4a7891",
+    "快门声音工具.exe": "255c81358d8405dff6803aa170c85e2576df15fc5ba050b1b0c92954c502e7c6"
+  }
+}

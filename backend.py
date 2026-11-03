@@ -7,7 +7,11 @@ import factory_sound
 ROOT=Path(__file__).resolve().parent
 CFG=json.loads((ROOT/'config.json').read_text(encoding='utf-8'))
 RESEARCH=Path(CFG['research']); WORK=RESEARCH.parent
-sys.path[:0]=[str(RESEARCH),str(WORK/'research_libs'),CFG['toolkit']]
+TOOLKIT=Path(CFG['toolkit'])
+sys.path[:0]=[str(RESEARCH),str(WORK/'research_libs'),str(TOOLKIT/'deps'),str(TOOLKIT),str(WORK/'restore_v0_1')]
+libusb_dir=TOOLKIT/'deps/libusb_package'
+if libusb_dir.is_dir():
+    os.environ['PATH']=str(libusb_dir)+os.pathsep+os.environ.get('PATH','')
 MAX_SAMPLES=14880  # largest buffer already exercised on this camera: 15360 bytes
 OFF=0x4637500
 INITIAL_SHA='e6e842de3ad83d11702d5c258f0ecb1d7a20af85b6c3fb1312f8b1eb87f578dd'

@@ -4,6 +4,8 @@
 
 [详细使用说明](使用说明.md) · [配置示例](config.example.json) · [原厂恢复离线测试](factory_verification.json)
 
+![ZV-E10M2 快门声音工具 v0.2.1 界面](assets/shutter-tool-v0.2.1.png)
+
 ## 适用范围
 
 适用于 Sony ZV-E10M2 固件 1.02，以及工具已记录和核验的相机状态。程序会检查主程序、色彩程序、声音包和当前音频。相同机型和固件号仍需通过文件校验。

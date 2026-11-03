@@ -93,7 +93,7 @@ class App:
         if self.confirm('恢复上一版声音'):self.start(['restore','--power-confirmed'])
     def factory(self):
         if not self.power.get():messagebox.showinfo('电量','请确认电量超过 50%，再勾选电量确认。');return
-        if messagebox.askokcancel('恢复原厂声音','将备份当前版本，停用自定义完整快门音，并恢复原厂快门声音和原厂加载程序。\n\nFL2／FL3 和其他相机设置保持不变。恢复成功后仍可用“恢复上一版声音”切回此次备份的声音。\n\n需要相机能正常连接；新恢复流程尚未完成真机验证。操作中请勿断电或拔线。\n\n是否开始恢复原厂声音？'):
+        if messagebox.askokcancel('恢复原厂声音','将备份当前版本，停用自定义完整快门音，并恢复原厂快门声音和原厂加载程序。\n\nFL2／FL3 和其他相机设置保持不变。恢复成功后仍可用“恢复上一版声音”切回此次备份的声音。\n\n需要相机能正常连接。操作中请勿断电或拔线。\n\n是否开始恢复原厂声音？'):
             self.start(['factory','--power-confirmed'])
     def start(self,args):
         if self.busy:return

@@ -4,7 +4,7 @@
 
 [详细使用说明](使用说明.md) · [配置示例](config.example.json) · [原厂恢复离线测试](factory_verification.json)
 
-![ZV-E10M2 快门声音工具 v0.2.1 界面](assets/shutter-tool-v0.2.1.png)
+![ZV-E10M2 快门声音工具 v0.3.0 界面](assets/shutter-tool-v0.3.0.jpg)
 
 ## 适用范围
 

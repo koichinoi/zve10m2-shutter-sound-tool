@@ -5,7 +5,7 @@ a = Analysis(
     ['gui.py'],
     pathex=[],
     binaries=[],
-    datas=[],
+    datas=[('filters/FL2-FL3.json','filters')],
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},

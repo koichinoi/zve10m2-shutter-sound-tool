@@ -2,21 +2,24 @@
 import json, os, queue, subprocess, sys, threading, tkinter as tk, winsound
 from pathlib import Path
 from tkinter import ttk, filedialog, messagebox
+from filters.apply_offline import apply_profiles
 
 ROOT=Path(sys.executable).resolve().parent if getattr(sys,'frozen',False) else Path(__file__).resolve().parent
 CFG=json.loads((ROOT/'config.json').read_text(encoding='utf-8'))
 
 class App:
     def __init__(self,root):
-        self.root=root;root.title('快门声音 · ZV-E10 II');root.geometry('820x575');root.minsize(760,550)
+        self.root=root;root.title('快门声音 · ZV-E10 II');root.geometry('820x620');root.minsize(760,600)
         root.configure(bg='#f4f6f8');self.q=queue.Queue();self.busy=False;self.prepared=None;self.buttons=[]
         style=ttk.Style();style.theme_use('clam');style.configure('.',font=('Microsoft YaHei UI',10))
         style.configure('TFrame',background='#f4f6f8');style.configure('TLabel',background='#f4f6f8')
         style.configure('Title.TLabel',font=('Microsoft YaHei UI',23,'bold'),foreground='#182b43')
         style.configure('TButton',padding=(13,9));style.configure('Accent.TButton',background='#245ad7',foreground='white')
         frame=ttk.Frame(root,padding=26);frame.pack(fill='both',expand=True)
-        ttk.Label(frame,text='把喜欢的声音，变成快门声',style='Title.TLabel').pack(anchor='w')
-        ttk.Label(frame,text='ZV-E10M2 · 固件 1.02 · v0.2.1',foreground='#59687b').pack(anchor='w',pady=(6,22))
+        heading=ttk.Frame(frame);heading.pack(fill='x')
+        ttk.Label(heading,text='把喜欢的声音，变成快门声',style='Title.TLabel').pack(side='left')
+        self.button(heading,'FL2／FL3 外观',self.open_filters).pack(side='right')
+        ttk.Label(frame,text='ZV-E10M2 · 固件 1.02 · v0.3.0',foreground='#59687b').pack(anchor='w',pady=(6,22))
         ttk.Label(frame,text='1   选择音频',font=('Microsoft YaHei UI',12,'bold')).pack(anchor='w')
         row=ttk.Frame(frame);row.pack(fill='x',pady=9)
         self.source=tk.StringVar(value='尚未选择音频')
@@ -56,7 +59,7 @@ class App:
         if self.log.winfo_manager():
             self.log.pack_forget()
             self.details.configure(text='详细日志')
-            self.root.geometry('820x575')
+            self.root.geometry('820x620')
         else:
             self.log.pack(fill='both',expand=True,pady=(8,0))
             self.details.configure(text='收起日志')
@@ -95,11 +98,63 @@ class App:
         if not self.power.get():messagebox.showinfo('电量','请确认电量超过 50%，再勾选电量确认。');return
         if messagebox.askokcancel('恢复原厂声音','将备份当前版本，停用自定义完整快门音，并恢复原厂快门声音和原厂加载程序。\n\nFL2／FL3 和其他相机设置保持不变。恢复成功后仍可用“恢复上一版声音”切回此次备份的声音。\n\n需要相机能正常连接。操作中请勿断电或拔线。\n\n是否开始恢复原厂声音？'):
             self.start(['factory','--power-confirmed'])
+    def open_filters(self):
+        dialog=tk.Toplevel(self.root)
+        dialog.title('FL2／FL3 外观')
+        dialog.transient(self.root)
+        dialog.resizable(False,False)
+        frame=ttk.Frame(dialog,padding=22)
+        frame.pack(fill='both',expand=True)
+        ttk.Label(frame,text='从匹配的 ZV-E10M2 1.02 备份生成外观文件',font=('Microsoft YaHei UI',12,'bold')).pack(anchor='w')
+        ttk.Label(frame,text='在电脑上离线生成。选择包含三份原始文件的目录。').pack(anchor='w',pady=(6,12))
+        ttk.Label(frame,text='cpapp-b.bin · unit-02a40001.bin · unit-02a4000d.bin').pack(anchor='w')
+        originals=ROOT/'filter_originals'
+        source=tk.StringVar(master=dialog,value=str(originals) if originals.is_dir() else '')
+        parent=tk.StringVar(master=dialog)
+        for label,value in (('原始备份目录',source),('输出位置',parent)):
+            ttk.Label(frame,text=label).pack(anchor='w',pady=(12,3))
+            row=ttk.Frame(frame)
+            row.pack(fill='x')
+            ttk.Entry(row,textvariable=value,width=58,state='readonly').pack(side='left',fill='x',expand=True)
+            def choose_directory(variable=value,title=label):
+                directory=filedialog.askdirectory(parent=dialog,title=title,mustexist=True)
+                if directory:
+                    variable.set(directory)
+            ttk.Button(row,text='选择目录',command=choose_directory).pack(side='left',padx=(8,0))
+
+        choice=tk.StringVar(master=dialog,value='FL2 + FL3')
+        ttk.Label(frame,text='生成外观').pack(anchor='w',pady=(12,3))
+        ttk.Combobox(frame,textvariable=choice,values=('FL2 + FL3','FL2','FL3'),state='readonly',width=14).pack(anchor='w')
+        ttk.Label(frame,text='将在输出位置新建外观目录。').pack(anchor='w',pady=(6,10))
+
+        def generate():
+            if not source.get() or not parent.get():
+                messagebox.showinfo('选择目录','请选择原始备份目录和输出位置。',parent=dialog)
+                return
+            looks=('FL2','FL3') if choice.get()=='FL2 + FL3' else (choice.get(),)
+            output=Path(parent.get())/('ZVE10M2-'+'-'.join(looks))
+            if output.exists():
+                messagebox.showerror('目录已存在','请另选一个输出位置。',parent=dialog)
+                return
+            input_path=Path(source.get())
+            dialog.destroy()
+            self.start(['filters',str(input_path),str(output),*looks])
+
+        ttk.Button(frame,text='生成外观文件',command=generate,style='Accent.TButton').pack(anchor='e')
+        dialog.grab_set()
+        dialog.focus_set()
+
     def start(self,args):
         if self.busy:return
         self.busy=True;self.error=None;self.result.set('正在处理…');self.refresh();self.progress.start(12)
         def job():
             try:
+                if args[0]=='filters':
+                    output=Path(args[2])
+                    apply_profiles(Path(args[1]),output,tuple(args[3:]))
+                    self.q.put(('line',f'外观文件已生成：{output}'))
+                    self.q.put(('done',0))
+                    return
                 env=os.environ.copy();env['PYTHONIOENCODING']='utf-8'
                 p=subprocess.Popen([CFG['python'],'-u',str(ROOT/'backend.py'),*args],stdout=subprocess.PIPE,stderr=subprocess.STDOUT,text=True,encoding='utf-8',errors='replace',env=env,creationflags=0x08000000)
                 for line in p.stdout:self.q.put(('line',line.rstrip()))
@@ -120,6 +175,8 @@ class App:
                         self.error=value
                     elif value.startswith(('检测到 Sony USB','未检测到 Sony USB')):
                         self.result.set(value.split('；',1)[0])
+                    elif value.startswith('外观文件已生成：'):
+                        self.result.set(value)
                     elif value.startswith('写入并回读成功'):
                         self.result.set('写入成功。拔线关机，等指示灯熄灭后取电池一分钟，再开机试听。')
             else:

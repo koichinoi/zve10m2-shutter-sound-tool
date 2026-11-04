@@ -19,7 +19,7 @@ class App:
         heading=ttk.Frame(frame);heading.pack(fill='x')
         ttk.Label(heading,text='把喜欢的声音，变成快门声',style='Title.TLabel').pack(side='left')
         self.button(heading,'FL2／FL3 外观',self.open_filters).pack(side='right')
-        ttk.Label(frame,text='ZV-E10M2 · 固件 1.02 · v0.3.0',foreground='#59687b').pack(anchor='w',pady=(6,22))
+        ttk.Label(frame,text='ZV-E10M2 · 固件 1.02 · v0.3.1',foreground='#59687b').pack(anchor='w',pady=(6,22))
         ttk.Label(frame,text='1   选择音频',font=('Microsoft YaHei UI',12,'bold')).pack(anchor='w')
         row=ttk.Frame(frame);row.pack(fill='x',pady=9)
         self.source=tk.StringVar(value='尚未选择音频')
@@ -140,7 +140,22 @@ class App:
             dialog.destroy()
             self.start(['filters',str(input_path),str(output),*looks])
 
-        ttk.Button(frame,text='生成外观文件',command=generate,style='Accent.TButton').pack(anchor='e')
+        actions=ttk.Frame(frame)
+        actions.pack(fill='x')
+        ttk.Button(actions,text='生成外观文件',command=generate).pack(side='left')
+
+        def import_camera():
+            if not self.power.get():
+                messagebox.showinfo('电量确认','请在主窗口勾选相机电量超过 50%。',parent=dialog)
+                return
+            if messagebox.askokcancel(
+                    '导入相机',
+                    '将一起导入 FL2／FL3，分别用于 IN／SH。请将相机以 USB 海量存储器模式连接。\n\n工具会先核对并备份相机，写入时请保持供电和连接。',
+                    parent=dialog):
+                dialog.destroy()
+                self.start(['install-filters','--power-confirmed'])
+
+        ttk.Button(actions,text='导入两套到相机',command=import_camera,style='Accent.TButton').pack(side='right')
         dialog.grab_set()
         dialog.focus_set()
 
@@ -175,7 +190,7 @@ class App:
                         self.error=value
                     elif value.startswith(('检测到 Sony USB','未检测到 Sony USB')):
                         self.result.set(value.split('；',1)[0])
-                    elif value.startswith('外观文件已生成：'):
+                    elif value.startswith(('外观文件已生成：','FL2／FL3 已导入','相机已安装 FL2／FL3')):
                         self.result.set(value)
                     elif value.startswith('写入并回读成功'):
                         self.result.set('写入成功。拔线关机，等指示灯熄灭后取电池一分钟，再开机试听。')

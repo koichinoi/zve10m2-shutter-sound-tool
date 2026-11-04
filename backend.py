@@ -305,7 +305,7 @@ def _install(target,power):
         report['error']=str(e);raise
     finally:save(folder/'report.json',report);say('报告：'+str(folder/'report.json'))
 
-def install(target,power):
+def with_camera_lock(action):
     import msvcrt
     # Lock lifetime is the process lifetime; a crash cannot leave a stale held lock.
     with (ROOT/'operation.lock').open('a+b') as lock:
@@ -313,8 +313,11 @@ def install(target,power):
         lock.seek(0)
         try:msvcrt.locking(lock.fileno(),msvcrt.LK_NBLCK,1)
         except OSError:raise ValueError('另一个窗口正在操作相机，请等待完成')
-        try:return _install(target,power)
+        try:return action()
         finally:lock.seek(0);msvcrt.locking(lock.fileno(),msvcrt.LK_UNLCK,1)
+
+def install(target,power):
+    return with_camera_lock(lambda:_install(target,power))
 
 def main():
     p=argparse.ArgumentParser();s=p.add_subparsers(dest='command',required=True)
@@ -322,11 +325,15 @@ def main():
     a=s.add_parser('install');a.add_argument('target');a.add_argument('--power-confirmed',action='store_true')
     a=s.add_parser('restore');a.add_argument('--power-confirmed',action='store_true')
     a=s.add_parser('factory');a.add_argument('--power-confirmed',action='store_true')
+    a=s.add_parser('install-filters');a.add_argument('--power-confirmed',action='store_true')
     a=s.add_parser('detect')
     args=p.parse_args()
     try:
         if args.command=='prepare':prepare(args.source,args.gain)
         elif args.command=='install':install(args.target,args.power_confirmed)
+        elif args.command=='install-filters':
+            import filter_install
+            with_camera_lock(lambda:filter_install.install(sys.modules[__name__],args.power_confirmed))
         elif args.command=='factory':install('factory',args.power_confirmed)
         elif args.command=='restore':
             if not (ROOT/'previous.json').exists():raise ValueError('还没有用本工具替换过声音，因此没有上一版可恢复')

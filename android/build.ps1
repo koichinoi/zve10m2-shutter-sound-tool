@@ -5,7 +5,7 @@ param(
     [string] $ServiceAuth,
     [string] $PreparedSound,
     [string] $CustomSound,
-    [string] $Output = (Join-Path $PSScriptRoot 'build/ZVE10-II-Android-0.1.9.apk')
+    [string] $Output = (Join-Path $PSScriptRoot 'build/ZVE10-II-Android-0.2.1.apk')
 )
 
 $ErrorActionPreference = 'Stop'

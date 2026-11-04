@@ -21,12 +21,33 @@ import java.io.*;
 import java.util.Locale;
 
 public final class MainActivity extends Activity {
+    private static final int PAPER = 0xfffff7f6, INK = 0xff302028, MUTED = 0xff715663;
+    private static final int BERRY = 0xff9a2146, DARK = 0xff45192b, BLUSH = 0xffffe8ee;
+    private final ScrollView[] screens = new ScrollView[3];
+    private final Button[] tabs = new Button[3];
+    private int activeTab;
     private static final String USB_PERMISSION = "io.github.koichinoi.zve10tool.USB_PERMISSION";
     private static final int PICK_AUDIO = 1, EXPORT_AUDIO = 2, EXPORT_LOOKS = 3, EXPORT_CAMERA = 4, PICK_BACKUP = 10;
     private final Uri[] originals = new Uri[Looks.FILES.length];
     private final Button[] backupButtons = new Button[Looks.FILES.length];
     private TextView liveStatus;
-    private final java.util.ArrayDeque<String> statusLog = new java.util.ArrayDeque<>();
+    private final java.util.ArrayDeque<LogEntry> statusLog = new java.util.ArrayDeque<>();
+    private static final java.time.format.DateTimeFormatter LOG_TIME =
+            java.time.format.DateTimeFormatter.ofPattern("HH:mm:ss", Locale.ROOT);
+    private AlertDialog logDialog;
+    private LinearLayout logRows;
+    private ScrollView logScroll;
+    private TextView logCount;
+
+    private static final class LogEntry {
+        final String time, message;
+        final Area area;
+        LogEntry(Area area, String message) {
+            this.time = java.time.LocalTime.now().format(LOG_TIME);
+            this.area = area;
+            this.message = message;
+        }
+    }
     private enum Area {
         AUDIO("快门音"), LOOKS("创意外观"), USB("USB"), SERVICE("相机");
         final String label;
@@ -84,7 +105,7 @@ public final class MainActivity extends Activity {
 
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
-        root.setBackgroundColor(0xfff4f7fb);
+        root.setBackgroundColor(PAPER);
         root.setOnApplyWindowInsetsListener((view, insets) -> {
             root.setPadding(insets.getSystemWindowInsetLeft(), insets.getSystemWindowInsetTop(),
                     insets.getSystemWindowInsetRight(), insets.getSystemWindowInsetBottom());
@@ -93,36 +114,73 @@ public final class MainActivity extends Activity {
 
         LinearLayout header = new LinearLayout(this);
         header.setOrientation(LinearLayout.VERTICAL);
-        header.setPadding(dp(20), dp(10), dp(20), dp(10));
-        header.setBackgroundColor(0xff142a48);
-        root.addView(header);
-        TextView title = label(header, "ZV-E10 II 相机工具  ·  0.1.9", 18, true);
+        header.setPadding(dp(16), dp(14), dp(16), dp(12));
+        header.setBackground(rounded(DARK, 22));
+        LinearLayout.LayoutParams headerParams = new LinearLayout.LayoutParams(-1, -2);
+        headerParams.setMargins(dp(14), dp(8), dp(14), dp(8));
+        root.addView(header, headerParams);
+        LinearLayout identity = new LinearLayout(this);
+        identity.setGravity(android.view.Gravity.CENTER_VERTICAL);
+        header.addView(identity);
+        ImageView mascot = new ImageView(this);
+        mascot.setImageResource(getApplicationInfo().icon);
+        mascot.setBackground(rounded(BLUSH, 12));
+        mascot.setClipToOutline(true);
+        identity.addView(mascot, new LinearLayout.LayoutParams(dp(44), dp(44)));
+        LinearLayout nameplate = new LinearLayout(this);
+        nameplate.setOrientation(LinearLayout.VERTICAL);
+        nameplate.setPadding(dp(12), 0, 0, 0);
+        identity.addView(nameplate, new LinearLayout.LayoutParams(0, -2, 1));
+        TextView title = label(nameplate, "ZV-E10 II 相机工具", 19, true);
         title.setTextColor(Color.WHITE);
+        label(nameplate, "固件 1.02  ·  安卓 0.2.1", 12, false).setTextColor(0xffffcddd);
+        Button history = new Button(this, null, android.R.attr.borderlessButtonStyle);
+        history.setText("日志");
+        history.setMinWidth(0);
+        history.setTextColor(Color.WHITE);
+        history.setOnClickListener(view -> showLog());
+        identity.addView(history, new LinearLayout.LayoutParams(-2, dp(48)));
+
         LinearLayout statusRow = new LinearLayout(this);
         statusRow.setGravity(android.view.Gravity.CENTER_VERTICAL);
-        header.addView(statusRow);
+        statusRow.setPadding(dp(12), dp(8), dp(12), dp(8));
+        statusRow.setBackground(rounded(0xff603047, 12));
+        LinearLayout.LayoutParams statusParams = new LinearLayout.LayoutParams(-1, -2);
+        statusParams.topMargin = dp(8);
+        header.addView(statusRow, statusParams);
+        label(statusRow, "●", 12, false).setTextColor(0xffffaabd);
         liveStatus = new TextView(this);
-        liveStatus.setTextColor(0xffe0efff);
+        liveStatus.setTextColor(0xffffedf3);
+        liveStatus.setPadding(dp(8), 0, 0, 0);
         liveStatus.setTextSize(14);
+        liveStatus.setMinLines(2);
         liveStatus.setMaxLines(3);
         liveStatus.setEllipsize(android.text.TextUtils.TruncateAt.END);
         statusRow.addView(liveStatus, new LinearLayout.LayoutParams(0, -2, 1));
-        Button history = new Button(this, null, android.R.attr.borderlessButtonStyle);
-        history.setText("日志");
-        history.setTextColor(Color.WHITE);
-        history.setOnClickListener(view -> showLog());
-        statusRow.addView(history, new LinearLayout.LayoutParams(-2, -2));
         setStatus(Area.SERVICE, "等待操作 · 固件 1.02");
 
-        ScrollView scroll = new ScrollView(this);
-        scroll.setFillViewport(true);
-        LinearLayout page = new LinearLayout(this);
-        page.setOrientation(LinearLayout.VERTICAL);
-        page.setPadding(dp(20), 0, dp(20), dp(24));
-        scroll.addView(page);
-        root.addView(scroll, new LinearLayout.LayoutParams(-1, 0, 1));
+        LinearLayout navigation = new LinearLayout(this);
+        navigation.setPadding(dp(4), dp(3), dp(4), dp(3));
+        navigation.setBackground(rounded(0xfff6e4e9, 16));
+        LinearLayout.LayoutParams navParams = new LinearLayout.LayoutParams(-1, -2);
+        navParams.setMargins(dp(14), 0, dp(14), dp(8));
+        root.addView(navigation, navParams);
+        String[] tabLabels = {"快门音", "创意外观", "相机"};
+        for (int i = 0; i < tabs.length; i++) {
+            int tab = i;
+            Button item = new Button(this, null, android.R.attr.borderlessButtonStyle);
+            item.setText(tabLabels[i]);
+            item.setMinWidth(0);
+            item.setPadding(0, 0, 0, 0);
+            item.setOnClickListener(view -> selectTab(tab));
+            tabs[i] = item;
+            navigation.addView(item, new LinearLayout.LayoutParams(0, dp(48), 1));
+        }
+        FrameLayout content = new FrameLayout(this);
+        root.addView(content, new LinearLayout.LayoutParams(-1, 0, 1));
         setContentView(root);
 
+        LinearLayout page = card(screen(content, 0));
         section(page, "自定义快门音");
         label(page, "选取最长 0.620 秒的音频，调整音量、试听并导出 WAV。", 14, false);
         chooseAudio = button(page, "选择音频", view -> pick("audio/*", PICK_AUDIO));
@@ -130,6 +188,8 @@ public final class MainActivity extends Activity {
         volume = new SeekBar(this);
         volume.setMax(90);
         volume.setProgress(90);
+        volume.setProgressTintList(ColorStateList.valueOf(BERRY));
+        volume.setThumbTintList(ColorStateList.valueOf(BERRY));
         volume.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
             public void onStartTrackingTouch(SeekBar bar) {}
             public void onStopTrackingTouch(SeekBar bar) {}
@@ -144,15 +204,18 @@ public final class MainActivity extends Activity {
         });
         page.addView(volume);
         button(page, "生成快门音", view -> prepareAudio());
-        preview = button(page, "试听", view -> play());
-        saveAudio = button(page, "导出 WAV", view -> export("audio/wav", "shutter.wav", EXPORT_AUDIO));
+        LinearLayout audioActions = actionRow(page);
+        preview = action(audioActions, "试听", false, true, view -> play());
+        saveAudio = action(audioActions, "导出 WAV", false, true,
+                view -> export("audio/wav", "shutter.wav", EXPORT_AUDIO));
         writeCustom = button(page, "写入自定义快门音", view -> checkService(true, ServiceAction.CUSTOM));
 
+        page = card(screen(content, 1));
         section(page, "FL2／FL3 创意外观");
         label(page, "选择三份匹配的原始备份，校验后生成外观 ZIP。", 14, false);
         for (int i = 0; i < originals.length; i++) {
             int slot = i;
-            backupButtons[i] = button(page, Looks.FILES[i], view -> pick("*/*", PICK_BACKUP + slot));
+            backupButtons[i] = action(page, Looks.FILES[i], false, false, view -> pick("*/*", PICK_BACKUP + slot));
         }
         looks = new Spinner(this);
         ArrayAdapter<String> adapter = new ArrayAdapter<>(this, android.R.layout.simple_spinner_item,
@@ -169,23 +232,28 @@ public final class MainActivity extends Activity {
         });
         page.addView(looks);
         generate = button(page, "生成外观文件", view -> prepareLooks());
-        saveLooks = button(page, "导出外观 ZIP", view ->
+        saveLooks = action(page, "导出外观 ZIP", false, false, view ->
                 export("application/zip", "ZVE10M2-" + lookLabel() + ".zip", EXPORT_LOOKS));
 
+        LinearLayout cameraPage = screen(content, 2);
+        page = card(cameraPage);
         section(page, "USB 相机连接");
-        label(page, "用支持 OTG 的数据线连接相机，选择 USB 海量存储器。本地测试版可从手机生成并写入快门音。导入外观和原厂恢复请使用电脑版。", 14, false);
+        label(page, "用 OTG 数据线连接相机，选择 USB 海量存储器。", 14, false);
         button(page, "检测 USB 相机", view -> checkUsb(true));
         retryUsb = button(page, "弹出后接管检测", null);
         retryUsb.setVisibility(View.GONE);
         button(page, "相机服务模式检测", view -> checkService(true, ServiceAction.DETECT));
+        page = card(cameraPage);
+        section(page, "备份与测试");
         button(page, "备份相机文件", view -> checkService(true, ServiceAction.BACKUP));
-        exportBackup = button(page, "导出相机备份 ZIP", view ->
+        exportBackup = action(page, "导出相机备份 ZIP", false, false, view ->
                 export("application/zip", "ZVE10M2-camera-backup.zip", EXPORT_CAMERA));
-        button(page, "测试临时写入", view -> checkService(true, ServiceAction.WRITE_TEST));
-        button(page, "写入预制快门音", view -> {
+        action(page, "测试临时写入", false, false, view -> checkService(true, ServiceAction.WRITE_TEST));
+        action(page, "写入预制快门音", false, false, view -> {
             if (MobileSound.available(this)) checkService(true, ServiceAction.SOUND);
             else setStatus(Area.SERVICE, "当前安装包缺少预制快门音。");
         });
+        selectTab(state == null ? 0 : state.getInt("activeTab"));
         refresh();
     }
 
@@ -588,6 +656,7 @@ public final class MainActivity extends Activity {
     }
 
     @Override protected void onDestroy() {
+        if (logDialog != null) logDialog.dismiss();
         unregisterReceiver(usbPermission);
         stopPreview();
         super.onDestroy();
@@ -596,51 +665,201 @@ public final class MainActivity extends Activity {
     private void setStatus(Area area, String message) {
         String text = area.label + " · " + message;
         liveStatus.setText(text);
-        if (text.equals(statusLog.peekLast())) return;
-        if (statusLog.size() == 60) statusLog.removeFirst();
-        statusLog.addLast(text);
+        LogEntry previous = statusLog.peekLast();
+        if (previous != null && previous.area == area && previous.message.equals(message)) return;
+        LogEntry entry = new LogEntry(area, message);
+        boolean full = statusLog.size() == 60;
+        if (full) statusLog.removeFirst();
+        statusLog.addLast(entry);
+        if (logRows == null) return;
+        int position = logScroll.getScrollY();
+        if (full) logRows.removeViewAt(logRows.getChildCount() - 1);
+        View row = addLogRow(entry, 0);
+        updateLogCount();
+        if (position > 0) {
+            ScrollView opened = logScroll;
+            row.post(() -> {
+                if (logScroll == opened) opened.scrollTo(0, position + row.getHeight() + dp(8));
+            });
+        }
     }
 
     private void showLog() {
-        TextView log = new TextView(this);
-        log.setTextIsSelectable(true);
-        log.setTextSize(14);
-        log.setPadding(dp(20), dp(10), dp(20), dp(10));
-        StringBuilder lines = new StringBuilder();
-        java.util.Iterator<String> recent = statusLog.descendingIterator();
-        while (recent.hasNext()) lines.append(recent.next()).append("\n\n");
-        log.setText(lines);
-        ScrollView scroll = new ScrollView(this);
-        scroll.addView(log);
-        new AlertDialog.Builder(this).setTitle("本次操作日志").setView(scroll)
-                .setPositiveButton("关闭", null).show();
+        if (logDialog != null) return;
+        LinearLayout panel = new LinearLayout(this);
+        panel.setOrientation(LinearLayout.VERTICAL);
+        panel.setPadding(dp(16), dp(16), dp(16), dp(14));
+        panel.setBackground(rounded(PAPER, 24));
+        label(panel, "操作日志", 22, true);
+        logCount = label(panel, "", 13, false);
+        updateLogCount();
+        logScroll = new ScrollView(this);
+        logScroll.setVerticalScrollBarEnabled(true);
+        logRows = new LinearLayout(this);
+        logRows.setOrientation(LinearLayout.VERTICAL);
+        logScroll.addView(logRows);
+        int height = Math.min(dp(420), getResources().getDisplayMetrics().heightPixels / 2);
+        LinearLayout.LayoutParams listParams = new LinearLayout.LayoutParams(-1, height);
+        listParams.topMargin = dp(12);
+        panel.addView(logScroll, listParams);
+
+        java.util.Iterator<LogEntry> recent = statusLog.descendingIterator();
+        while (recent.hasNext()) addLogRow(recent.next(), logRows.getChildCount());
+        LinearLayout controls = actionRow(panel);
+        action(controls, "复制日志", false, true, view -> copyLog());
+        action(controls, "关闭", true, true, view -> logDialog.dismiss());
+        logDialog = new AlertDialog.Builder(this).setView(panel).create();
+        logDialog.setOnDismissListener(dialog -> {
+            logDialog = null;
+            logRows = null;
+            logScroll = null;
+            logCount = null;
+        });
+        logDialog.show();
+        if (logDialog.getWindow() != null) {
+            logDialog.getWindow().setBackgroundDrawableResource(android.R.color.transparent);
+            logDialog.getWindow().setLayout(Math.min(dp(480), getResources().getDisplayMetrics().widthPixels - dp(28)), -2);
+        }
+    }
+
+    private View addLogRow(LogEntry entry, int index) {
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.VERTICAL);
+        row.setPadding(dp(12), dp(9), dp(12), dp(10));
+        row.setBackground(rounded(Color.WHITE, 14));
+        LinearLayout meta = new LinearLayout(this);
+        meta.setGravity(android.view.Gravity.CENTER_VERTICAL);
+        row.addView(meta);
+        TextView badge = label(meta, entry.area.label, 12, true);
+        badge.setTextColor(BERRY);
+        badge.setPadding(dp(8), dp(3), dp(8), dp(3));
+        badge.setBackground(rounded(BLUSH, 8));
+        TextView time = label(meta, entry.time, 12, false);
+        time.setPadding(dp(9), 0, 0, 0);
+        TextView message = label(row, entry.message, 14, false);
+        message.setTextColor(INK);
+        message.setPadding(0, dp(6), 0, 0);
+        message.setTextIsSelectable(true);
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(-1, -2);
+        params.bottomMargin = dp(8);
+        logRows.addView(row, index, params);
+        return row;
+    }
+
+    private void updateLogCount() {
+        logCount.setText(statusLog.size() + " 条记录  ·  最新在上");
+    }
+
+    private void copyLog() {
+        StringBuilder text = new StringBuilder();
+        java.util.Iterator<LogEntry> recent = statusLog.descendingIterator();
+        while (recent.hasNext()) {
+            LogEntry entry = recent.next();
+            text.append(entry.time).append("  ").append(entry.area.label).append("  ")
+                    .append(entry.message).append('\n');
+        }
+        android.content.ClipboardManager clipboard = getSystemService(android.content.ClipboardManager.class);
+        if (clipboard != null) clipboard.setPrimaryClip(android.content.ClipData.newPlainText("相机操作日志", text));
     }
 
     private void section(LinearLayout page, String title) {
-        TextView view = label(page, title, 20, true);
-        view.setPadding(0, dp(25), 0, dp(6));
+        TextView view = label(page, title, 22, true);
+        view.setPadding(0, 0, 0, dp(8));
     }
 
     private TextView label(LinearLayout page, String text, int size, boolean heading) {
         TextView view = new TextView(this);
         view.setText(text);
         view.setTextSize(size);
-        view.setTextColor(heading ? 0xff112846 : 0xff304866);
+        view.setTextColor(heading ? INK : MUTED);
         if (heading) view.setTypeface(null, Typeface.BOLD);
         page.addView(view);
         return view;
     }
 
     private Button button(LinearLayout page, String text, View.OnClickListener click) {
-        Button button = new Button(this);
+        return action(page, text, true, false, click);
+    }
+
+    private Button action(LinearLayout page, String text, boolean primary, boolean half,
+                          View.OnClickListener click) {
+        Button button = new Button(this, null, android.R.attr.borderlessButtonStyle);
         button.setText(text);
         button.setAllCaps(false);
-        button.setTextColor(Color.WHITE);
-        button.setBackgroundTintList(new ColorStateList(new int[][]{{-android.R.attr.state_enabled}, {}},
-                new int[]{0xff68768a, 0xff1858a0}));
+        button.setMinWidth(0);
+        button.setMinimumHeight(dp(48));
+        button.setPadding(dp(12), dp(7), dp(12), dp(7));
+        int[][] states = {{-android.R.attr.state_enabled}, {}};
+        button.setTextColor(new ColorStateList(states, new int[]{0xff75636b, primary ? Color.WHITE : DARK}));
+        android.graphics.drawable.StateListDrawable fill = new android.graphics.drawable.StateListDrawable();
+        fill.addState(states[0], rounded(0xffeee5e8, 12));
+        fill.addState(states[1], rounded(primary ? BERRY : BLUSH, 12));
+        button.setBackground(new android.graphics.drawable.RippleDrawable(
+                ColorStateList.valueOf(primary ? 0x40ffffff : 0x229a2146), fill, null));
         button.setOnClickListener(click);
-        page.addView(button, new LinearLayout.LayoutParams(-1, -2));
+        LinearLayout.LayoutParams params = half
+                ? new LinearLayout.LayoutParams(0, -1, 1) : new LinearLayout.LayoutParams(-1, -2);
+        params.topMargin = dp(8);
+        if (half && page.getChildCount() > 0) params.setMarginStart(dp(8));
+        page.addView(button, params);
         return button;
+    }
+
+    private LinearLayout actionRow(LinearLayout parent) {
+        LinearLayout row = new LinearLayout(this);
+        parent.addView(row, new LinearLayout.LayoutParams(-1, -2));
+        return row;
+    }
+
+    private android.graphics.drawable.GradientDrawable rounded(int color, int radius) {
+        android.graphics.drawable.GradientDrawable shape = new android.graphics.drawable.GradientDrawable();
+        shape.setColor(color);
+        shape.setCornerRadius(dp(radius));
+        return shape;
+    }
+
+    private LinearLayout screen(FrameLayout parent, int index) {
+        ScrollView scroll = new ScrollView(this);
+        scroll.setFillViewport(true);
+        screens[index] = scroll;
+        LinearLayout body = new LinearLayout(this);
+        body.setOrientation(LinearLayout.VERTICAL);
+        body.setPadding(dp(14), 0, dp(14), dp(16));
+        scroll.addView(body);
+        parent.addView(scroll, new FrameLayout.LayoutParams(-1, -1));
+        return body;
+    }
+
+    private LinearLayout card(LinearLayout parent) {
+        LinearLayout card = new LinearLayout(this);
+        card.setOrientation(LinearLayout.VERTICAL);
+        card.setPadding(dp(16), dp(16), dp(16), dp(16));
+        android.graphics.drawable.GradientDrawable surface = rounded(Color.WHITE, 18);
+        surface.setStroke(dp(1), 0xffeedce2);
+        card.setBackground(surface);
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(-1, -2);
+        params.bottomMargin = dp(10);
+        parent.addView(card, params);
+        return card;
+    }
+
+    private void selectTab(int index) {
+        activeTab = index >= 0 && index < tabs.length ? index : 0;
+        for (int i = 0; i < tabs.length; i++) {
+            boolean selected = i == activeTab;
+            tabs[i].setSelected(selected);
+            tabs[i].setTextColor(selected ? BERRY : MUTED);
+            tabs[i].setTypeface(null, selected ? Typeface.BOLD : Typeface.NORMAL);
+            tabs[i].setBackground(new android.graphics.drawable.RippleDrawable(
+                    ColorStateList.valueOf(0x229a2146),
+                    rounded(selected ? Color.WHITE : Color.TRANSPARENT, 12), rounded(Color.WHITE, 12)));
+            screens[i].setVisibility(selected ? View.VISIBLE : View.GONE);
+        }
+    }
+
+    @Override protected void onSaveInstanceState(Bundle state) {
+        state.putInt("activeTab", activeTab);
+        super.onSaveInstanceState(state);
     }
 
     private int dp(int size) {

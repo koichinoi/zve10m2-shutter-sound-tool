@@ -84,7 +84,7 @@ public final class MainActivity extends Activity {
         setContentView(scroll);
 
         label(page, "ZV-E10 II 相机工具", 27, true);
-        label(page, "固件 1.02  ·  安卓测试版 0.1.6", 15, false);
+        label(page, "固件 1.02  ·  安卓测试版 0.1.7", 15, false);
         section(page, "自定义快门音");
         label(page, "选取最长 0.620 秒的音频，调整音量、试听并导出 WAV。", 14, false);
         chooseAudio = button(page, "选择音频", view -> pick("audio/*", PICK_AUDIO));

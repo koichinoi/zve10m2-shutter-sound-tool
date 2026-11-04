@@ -4,7 +4,7 @@ param(
     [Parameter(Mandatory)] [string] $BuildTools,
     [string] $ServiceAuth,
     [string] $PreparedSound,
-    [string] $Output = (Join-Path $PSScriptRoot 'build/ZVE10-II-Android-0.1.6.apk')
+    [string] $Output = (Join-Path $PSScriptRoot 'build/ZVE10-II-Android-0.1.7.apk')
 )
 
 $ErrorActionPreference = 'Stop'
@@ -43,7 +43,12 @@ $classFiles = @($sources | ForEach-Object {
     Get-ChildItem -LiteralPath (Join-Path $classes 'io/github/koichinoi/zve10tool') -Filter "$class*.class" | ForEach-Object FullName
 })
 Invoke-Checked (Join-Path $BuildTools 'd8.bat') (@('--lib', $AndroidJar, '--min-api', '26', '--output', $build) + $classFiles)
-Invoke-Checked (Join-Path $BuildTools 'aapt2.exe') @('link', '-I', $AndroidJar, '--manifest', $manifest, '-A', $assets, '-o', $unsigned)
+$res = Join-Path $build 'res'
+$compiledRes = Join-Path $build 'res.zip'
+Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'res') -Destination $res -Recurse
+$aapt = Join-Path $BuildTools 'aapt2.exe'
+Invoke-Checked $aapt @('compile', '--dir', $res, '-o', $compiledRes)
+Invoke-Checked $aapt @('link', '-I', $AndroidJar, '--manifest', $manifest, '-A', $assets, '-o', $unsigned, $compiledRes)
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 $apk = [IO.Compression.ZipFile]::Open($unsigned, [IO.Compression.ZipArchiveMode]::Update)
 try {

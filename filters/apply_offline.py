@@ -15,10 +15,8 @@ def apply_profiles(source, destination, looks):
     if destination.exists():
         raise ValueError("Output directory must not already exist.")
 
-    profiles = [
-        json.loads((PROFILES / f"{look}.json").read_text(encoding="utf-8"))
-        for look in looks
-    ]
+    bundle = json.loads((PROFILES / "FL2-FL3.json").read_text(encoding="utf-8"))
+    profiles = [bundle[look] for look in looks]
     originals = profiles[0]["components"]
     output_files = {}
     for index, original in enumerate(originals):

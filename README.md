@@ -8,7 +8,7 @@
 
 ## 安卓测试版
 
-[下载公开 APK](android/downloads/ZVE10-II-Android-0.1.7-public.apk) · [安卓使用说明和源码](android/README.md)
+[下载公开 APK](android/downloads/ZVE10-II-Android-0.1.9-public.apk) · [安卓使用说明和源码](android/README.md)
 
 公开版可处理快门音、生成 FL2／FL3 外观文件和检测 USB。相机服务模式和预制快门音写入需本地构建。
 

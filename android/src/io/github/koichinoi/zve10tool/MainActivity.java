@@ -25,8 +25,14 @@ public final class MainActivity extends Activity {
     private static final int PICK_AUDIO = 1, EXPORT_AUDIO = 2, EXPORT_LOOKS = 3, EXPORT_CAMERA = 4, PICK_BACKUP = 10;
     private final Uri[] originals = new Uri[Looks.FILES.length];
     private final Button[] backupButtons = new Button[Looks.FILES.length];
-    private TextView audioStatus, looksStatus, usbStatus;
-    private Button chooseAudio, preview, saveAudio, generate, saveLooks;
+    private TextView liveStatus;
+    private final java.util.ArrayDeque<String> statusLog = new java.util.ArrayDeque<>();
+    private enum Area {
+        AUDIO("快门音"), LOOKS("创意外观"), USB("USB"), SERVICE("相机");
+        final String label;
+        Area(String label) { this.label = label; }
+    }
+    private Button chooseAudio, preview, saveAudio, writeCustom, generate, saveLooks;
     private SeekBar volume;
     private Spinner looks;
     private Uri audio;
@@ -36,16 +42,16 @@ public final class MainActivity extends Activity {
     private boolean checkingUsb;
     private UsbManager usb;
     private Button retryUsb;
-    private TextView serviceStatus;
     private Button exportBackup;
     private File cameraBackup;
     private static final String SERVICE_PERMISSION = USB_PERMISSION + ".SERVICE";
     private static final String BACKUP_PERMISSION = USB_PERMISSION + ".BACKUP";
     private static final String WRITE_TEST_PERMISSION = USB_PERMISSION + ".WRITE_TEST";
     private static final String SOUND_PERMISSION = USB_PERMISSION + ".SOUND";
+    private static final String CUSTOM_PERMISSION = USB_PERMISSION + ".CUSTOM";
     private enum ServiceAction {
         DETECT("相机服务模式检测", SERVICE_PERMISSION), BACKUP("备份相机文件", BACKUP_PERMISSION),
-        WRITE_TEST("测试临时写入", WRITE_TEST_PERMISSION), SOUND("写入预制快门音", SOUND_PERMISSION);
+        WRITE_TEST("测试临时写入", WRITE_TEST_PERMISSION), SOUND("写入预制快门音", SOUND_PERMISSION), CUSTOM("写入自定义快门音", CUSTOM_PERMISSION);
         final String label, permission;
         ServiceAction(String label, String permission) {
             this.label = label;
@@ -60,6 +66,7 @@ public final class MainActivity extends Activity {
             if (BACKUP_PERMISSION.equals(intent.getAction())) checkService(false, ServiceAction.BACKUP);
             if (WRITE_TEST_PERMISSION.equals(intent.getAction())) checkService(false, ServiceAction.WRITE_TEST);
             if (SOUND_PERMISSION.equals(intent.getAction())) checkService(false, ServiceAction.SOUND);
+            if (CUSTOM_PERMISSION.equals(intent.getAction())) checkService(false, ServiceAction.CUSTOM);
         }
     };
 
@@ -71,20 +78,51 @@ public final class MainActivity extends Activity {
         filter.addAction(BACKUP_PERMISSION);
         filter.addAction(WRITE_TEST_PERMISSION);
         filter.addAction(SOUND_PERMISSION);
+        filter.addAction(CUSTOM_PERMISSION);
         if (Build.VERSION.SDK_INT >= 33) registerReceiver(usbPermission, filter, RECEIVER_NOT_EXPORTED);
         else registerReceiver(usbPermission, filter);
+
+        LinearLayout root = new LinearLayout(this);
+        root.setOrientation(LinearLayout.VERTICAL);
+        root.setBackgroundColor(0xfff4f7fb);
+        root.setOnApplyWindowInsetsListener((view, insets) -> {
+            root.setPadding(insets.getSystemWindowInsetLeft(), insets.getSystemWindowInsetTop(),
+                    insets.getSystemWindowInsetRight(), insets.getSystemWindowInsetBottom());
+            return insets.consumeSystemWindowInsets();
+        });
+
+        LinearLayout header = new LinearLayout(this);
+        header.setOrientation(LinearLayout.VERTICAL);
+        header.setPadding(dp(20), dp(10), dp(20), dp(10));
+        header.setBackgroundColor(0xff142a48);
+        root.addView(header);
+        TextView title = label(header, "ZV-E10 II 相机工具  ·  0.1.9", 18, true);
+        title.setTextColor(Color.WHITE);
+        LinearLayout statusRow = new LinearLayout(this);
+        statusRow.setGravity(android.view.Gravity.CENTER_VERTICAL);
+        header.addView(statusRow);
+        liveStatus = new TextView(this);
+        liveStatus.setTextColor(0xffe0efff);
+        liveStatus.setTextSize(14);
+        liveStatus.setMaxLines(3);
+        liveStatus.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        statusRow.addView(liveStatus, new LinearLayout.LayoutParams(0, -2, 1));
+        Button history = new Button(this, null, android.R.attr.borderlessButtonStyle);
+        history.setText("日志");
+        history.setTextColor(Color.WHITE);
+        history.setOnClickListener(view -> showLog());
+        statusRow.addView(history, new LinearLayout.LayoutParams(-2, -2));
+        setStatus(Area.SERVICE, "等待操作 · 固件 1.02");
 
         ScrollView scroll = new ScrollView(this);
         scroll.setFillViewport(true);
         LinearLayout page = new LinearLayout(this);
         page.setOrientation(LinearLayout.VERTICAL);
-        page.setPadding(dp(24), dp(52), dp(24), dp(40));
-        page.setBackgroundColor(0xfff4f7fb);
+        page.setPadding(dp(20), 0, dp(20), dp(24));
         scroll.addView(page);
-        setContentView(scroll);
+        root.addView(scroll, new LinearLayout.LayoutParams(-1, 0, 1));
+        setContentView(root);
 
-        label(page, "ZV-E10 II 相机工具", 27, true);
-        label(page, "固件 1.02  ·  安卓测试版 0.1.7", 15, false);
         section(page, "自定义快门音");
         label(page, "选取最长 0.620 秒的音频，调整音量、试听并导出 WAV。", 14, false);
         chooseAudio = button(page, "选择音频", view -> pick("audio/*", PICK_AUDIO));
@@ -99,7 +137,7 @@ public final class MainActivity extends Activity {
                 gain.setText("音量 " + (progress + 10) + "%");
                 if (user) {
                     audioOutput = null;
-                    if (audio != null) audioStatus.setText("音量已调整，请重新生成。");
+                    if (audio != null) setStatus(Area.AUDIO, "音量已调整，请重新生成。");
                     refresh();
                 }
             }
@@ -108,7 +146,7 @@ public final class MainActivity extends Activity {
         button(page, "生成快门音", view -> prepareAudio());
         preview = button(page, "试听", view -> play());
         saveAudio = button(page, "导出 WAV", view -> export("audio/wav", "shutter.wav", EXPORT_AUDIO));
-        audioStatus = label(page, "请选择音频。", 14, false);
+        writeCustom = button(page, "写入自定义快门音", view -> checkService(true, ServiceAction.CUSTOM));
 
         section(page, "FL2／FL3 创意外观");
         label(page, "选择三份匹配的原始备份，校验后生成外观 ZIP。", 14, false);
@@ -124,7 +162,7 @@ public final class MainActivity extends Activity {
         looks.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
             public void onNothingSelected(AdapterView<?> parent) {}
             public void onItemSelected(AdapterView<?> parent, View view, int index, long id) {
-                if (looksOutput != null) looksStatus.setText("外观选项已调整，请重新生成。");
+                if (looksOutput != null) setStatus(Area.LOOKS, "外观选项已调整，请重新生成。");
                 looksOutput = null;
                 refresh();
             }
@@ -133,12 +171,10 @@ public final class MainActivity extends Activity {
         generate = button(page, "生成外观文件", view -> prepareLooks());
         saveLooks = button(page, "导出外观 ZIP", view ->
                 export("application/zip", "ZVE10M2-" + lookLabel() + ".zip", EXPORT_LOOKS));
-        looksStatus = label(page, "请选择备份文件。", 14, false);
 
         section(page, "USB 相机连接");
-        label(page, "用支持 OTG 的数据线连接相机，选择 USB 海量存储器。此版本可写入随 APK 准备的快门音。导入外观和原厂恢复请使用电脑版。", 14, false);
+        label(page, "用支持 OTG 的数据线连接相机，选择 USB 海量存储器。本地测试版可从手机生成并写入快门音。导入外观和原厂恢复请使用电脑版。", 14, false);
         button(page, "检测 USB 相机", view -> checkUsb(true));
-        usbStatus = label(page, "等待检测。", 14, false);
         retryUsb = button(page, "弹出后接管检测", null);
         retryUsb.setVisibility(View.GONE);
         button(page, "相机服务模式检测", view -> checkService(true, ServiceAction.DETECT));
@@ -148,30 +184,41 @@ public final class MainActivity extends Activity {
         button(page, "测试临时写入", view -> checkService(true, ServiceAction.WRITE_TEST));
         button(page, "写入预制快门音", view -> {
             if (MobileSound.available(this)) checkService(true, ServiceAction.SOUND);
-            else serviceStatus.setText("当前安装包缺少预制快门音。");
+            else setStatus(Area.SERVICE, "当前安装包缺少预制快门音。");
         });
-        serviceStatus = label(page, "读取相机固件版本，供直连写入前验证。", 14, false);
         refresh();
     }
 
     private void checkService(boolean ask, ServiceAction action) {
         if (usb == null || checkingUsb || working) return;
+        if (action == ServiceAction.CUSTOM) {
+            if (audioOutput == null) {
+                setStatus(Area.SERVICE, "请先选择并生成快门音。");
+                return;
+            }
+            try (InputStream input = getAssets().open(CustomSound.ROOT + "manifest.json")) {
+                // This feature requires a camera-specific local build.
+            } catch (IOException missing) {
+                setStatus(Area.SERVICE, "当前安装包缺少自定义快门音写入模板。");
+                return;
+            }
+        }
 
         UsbDevice camera = null;
         for (UsbDevice device : usb.getDeviceList().values()) {
             if (!SonyService.isService(device) && !UsbInquiry.supportsRetry(device)) continue;
             if (camera != null) {
-                serviceStatus.setText("检测到多个匹配设备，请只连接一台相机。");
+                setStatus(Area.SERVICE, "检测到多个匹配设备，请只连接一台相机。");
                 return;
             }
             camera = device;
         }
         if (camera == null) {
-            serviceStatus.setText("请连接相机并选择 USB 海量存储器。");
+            setStatus(Area.SERVICE, "请连接相机并选择 USB 海量存储器。");
             return;
         }
         if (!usb.hasPermission(camera)) {
-            serviceStatus.setText("需要为当前 USB 模式授权。");
+            setStatus(Area.SERVICE, "需要为当前 USB 模式授权。");
             if (ask) {
                 Intent result = new Intent(action.permission).setPackage(getPackageName());
                 usb.requestPermission(camera, PendingIntent.getBroadcast(this, 0, result, PendingIntent.FLAG_IMMUTABLE));
@@ -180,9 +227,9 @@ public final class MainActivity extends Activity {
         }
         UsbDevice selected = camera;
         if (SonyService.isService(selected)) {
-            if (action == ServiceAction.SOUND) {
-                if (ask) confirmSound(selected);
-                else serviceStatus.setText("已授权。再次点击「写入预制快门音」可查看待写入声音。");
+            if (action == ServiceAction.SOUND || action == ServiceAction.CUSTOM) {
+                if (ask) confirmSound(selected, action);
+                else setStatus(Area.SERVICE, "已授权。再次点击「" + action.label + "」并确认。");
             } else if (action != ServiceAction.WRITE_TEST) {
                 runService(selected, false, action);
             } else if (ask) {
@@ -193,7 +240,7 @@ public final class MainActivity extends Activity {
                         .setPositiveButton("开始测试", (dialog, button) -> runService(selected, false, action))
                         .show();
             } else {
-                serviceStatus.setText("已授权，再点一次「测试临时写入」并确认。");
+                setStatus(Area.SERVICE, "已授权，再点一次「测试临时写入」并确认。");
             }
         } else if (ask) {
             new AlertDialog.Builder(this)
@@ -203,42 +250,47 @@ public final class MainActivity extends Activity {
                     .setPositiveButton("已弹出，继续", (dialog, button) -> runService(selected, true, action))
                     .show();
         } else {
-            serviceStatus.setText("已授权。弹出 Sony U 盘后再点一次「" + action.label + "」。");
+            setStatus(Area.SERVICE, "已授权。弹出 Sony U 盘后再点一次「" + action.label + "」。");
         }
     }
 
-    private void confirmSound(UsbDevice camera) {
+    private void confirmSound(UsbDevice camera, ServiceAction action) {
         try {
             new AlertDialog.Builder(this)
-                    .setTitle("写入 " + MobileSound.name(this))
+                    .setTitle(action == ServiceAction.CUSTOM ? "写入刚生成的快门音" : "写入 " + MobileSound.name(this))
                     .setMessage("将先备份并核对相机状态。请确认相机电量超过 50%，写入时保持应用在前台，保持数据线连接。")
                     .setNegativeButton("取消", null)
-                    .setPositiveButton("电量超过 50%，写入", (dialog, button) -> runService(camera, false, ServiceAction.SOUND))
+                    .setPositiveButton("电量超过 50%，写入", (dialog, button) -> runService(camera, false, action))
                     .show();
         } catch (Exception error) {
-            serviceStatus.setText("无法读取预制快门音：" + error.getLocalizedMessage());
+            setStatus(Area.SERVICE, "无法读取预制快门音：" + error.getLocalizedMessage());
         }
     }
 
     private void runService(UsbDevice camera, boolean switching, ServiceAction action) {
         boolean backup = action == ServiceAction.BACKUP;
+        boolean sound = action == ServiceAction.SOUND || action == ServiceAction.CUSTOM;
+        File customWav = action == ServiceAction.CUSTOM ? audioOutput : null;
         if (checkingUsb || working) return;
         UsbDevice current = usb.getDeviceList().get(camera.getDeviceName());
         if (current == null || current.getProductId() != camera.getProductId()
                 || current.getVendorId() != camera.getVendorId() || !usb.hasPermission(current)) {
-            serviceStatus.setText("USB 设备已变化，请重新检测。");
+            setStatus(Area.SERVICE, "USB 设备已变化，请重新检测。");
             return;
         }
         checkingUsb = true;
         refresh();
-        if ((backup || action == ServiceAction.SOUND) && !switching) {
+        if ((backup || sound) && !switching) {
             getWindow().addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         }
         retryUsb.setVisibility(View.GONE);
-        serviceStatus.setText(switching ? "正在请求切换相机服务模式…" : "正在认证并读取固件版本…");
+        setStatus(Area.SERVICE, switching ? "正在请求切换相机服务模式…" : "正在认证并读取固件版本…");
         new Thread(() -> {
             String message;
             File completedBackup = null;
+            java.util.function.Consumer<String> progress = update -> runOnUiThread(() -> {
+                if (!isDestroyed()) setStatus(Area.SERVICE, update);
+            });
             try {
                 byte[] keys = new byte[3072];
                 try (DataInputStream input = new DataInputStream(getAssets().open("sony-service-auth.bin"))) {
@@ -261,10 +313,9 @@ public final class MainActivity extends Activity {
                             if (!"33002_03.2025101101".equals(version)) throw new IOException("固件版本与目标版本不匹配");
                             message = "服务模式读取成功 · ZV-E10M2 固件 1.02";
                             if (backup) {
-                                runOnUiThread(() -> serviceStatus.setText("正在读取并校验 4 个相机文件，约 111 MB，请保持连接…"));
                                 File archive = File.createTempFile("zve-camera-", ".zip", getCacheDir());
                                 try {
-                                    CameraBackup.create(service, archive);
+                                    CameraBackup.create(service, archive, progress);
                                     completedBackup = archive;
                                 } finally {
                                     if (completedBackup == null) archive.delete();
@@ -273,9 +324,8 @@ public final class MainActivity extends Activity {
                             } else if (action == ServiceAction.WRITE_TEST) {
                                 service.testTemporaryWrite();
                                 message = "临时写入、逐字节回读和删除均成功。";
-                            } else if (action == ServiceAction.SOUND) {
-                                runOnUiThread(() -> serviceStatus.setText("正在备份、写入并回读校验，请保持连接…"));
-                                completedBackup = MobileSound.install(this, service);
+                            } else if (sound) {
+                                completedBackup = MobileSound.install(this, service, customWav, progress);
                                 message = "快门音写入和回读通过。拔线，关机等读写灯熄灭，取出电池一分钟，再开机试听。";
                             }
                         }
@@ -284,7 +334,7 @@ public final class MainActivity extends Activity {
                     }
                 }
             } catch (Exception error) {
-                message = action == ServiceAction.SOUND && !switching
+                message = sound && !switching
                         ? "快门音未确认完成：" + error.getLocalizedMessage() + "。请保留应用数据和提示。"
                         : "服务检测未完成：" + error.getLocalizedMessage() + "。若相机已切换，可重新检测。";
             }
@@ -301,7 +351,7 @@ public final class MainActivity extends Activity {
                     if (cameraBackup != null && cameraBackup.getParentFile().equals(getCacheDir())) cameraBackup.delete();
                     cameraBackup = result;
                 }
-                serviceStatus.setText(status);
+                setStatus(Area.SERVICE, status);
                 refresh();
             });
         }, "zve-service-check").start();
@@ -311,7 +361,7 @@ public final class MainActivity extends Activity {
         if (checkingUsb) return;
         retryUsb.setVisibility(View.GONE);
         if (usb == null || !getPackageManager().hasSystemFeature("android.hardware.usb.host")) {
-            usbStatus.setText("手机未报告 USB Host 支持。");
+            setStatus(Area.USB, "手机未报告 USB Host 支持。");
             return;
         }
         UsbDevice sony = null;
@@ -320,7 +370,7 @@ public final class MainActivity extends Activity {
             for (int i = 0; i < device.getInterfaceCount(); i++) {
                 if (device.getInterface(i).getInterfaceClass() != UsbConstants.USB_CLASS_MASS_STORAGE) continue;
                 if (sony != null) {
-                    usbStatus.setText("检测到多个 Sony 存储接口，请仅连接一台相机。");
+                    setStatus(Area.USB, "检测到多个 Sony 存储接口，请仅连接一台相机。");
                     return;
                 }
                 sony = device;
@@ -328,14 +378,14 @@ public final class MainActivity extends Activity {
             }
         }
         if (sony == null) {
-            usbStatus.setText("未检测到 Sony 海量存储设备。");
+            setStatus(Area.USB, "未检测到 Sony 海量存储设备。");
             return;
         }
         String name = sony.getProductName();
         if (name == null || name.isEmpty()) name = "Sony USB 设备";
         String id = String.format(Locale.ROOT, " · %04X:%04X", sony.getVendorId(), sony.getProductId());
         boolean granted = usb.hasPermission(sony);
-        usbStatus.setText(name + id + (granted ? " · 已取得 USB 权限" : " · 尚未取得 USB 权限"));
+        setStatus(Area.USB, name + id + (granted ? " · 已取得 USB 权限" : " · 尚未取得 USB 权限"));
         if (granted) {
             probeUsb(sony, name + id, false);
         } else if (ask) {
@@ -349,7 +399,7 @@ public final class MainActivity extends Activity {
         if (checkingUsb) return;
         checkingUsb = true;
         retryUsb.setVisibility(View.GONE);
-        usbStatus.setText(prefix + " · 正在发送只读识别请求…");
+        setStatus(Area.USB, prefix + " · 正在发送只读识别请求…");
         new Thread(() -> {
             String message;
             boolean offerRetry = false;
@@ -367,7 +417,7 @@ public final class MainActivity extends Activity {
             runOnUiThread(() -> {
                 checkingUsb = false;
                 if (isDestroyed()) return;
-                usbStatus.setText(status);
+                setStatus(Area.USB, status);
                 if (canRetry) {
                     retryUsb.setVisibility(View.VISIBLE);
                     retryUsb.setOnClickListener(view -> confirmUsbRetry(device, prefix));
@@ -384,7 +434,7 @@ public final class MainActivity extends Activity {
                 .setPositiveButton("已弹出，开始检测", (dialog, button) -> {
                     UsbDevice current = usb.getDeviceList().get(device.getDeviceName());
                     if (current == null || !UsbInquiry.supportsRetry(current) || !usb.hasPermission(current)) {
-                        usbStatus.setText("USB 设备已变化，请重新检测。");
+                        setStatus(Area.USB, "USB 设备已变化，请重新检测。");
                         retryUsb.setVisibility(View.GONE);
                         return;
                     }
@@ -394,19 +444,19 @@ public final class MainActivity extends Activity {
     }
 
     private void prepareAudio() {
-        if (working || audio == null) {
-            if (!working) audioStatus.setText("请先选择音频。");
+        if (checkingUsb || working || audio == null) {
+            if (!working && !checkingUsb) setStatus(Area.AUDIO, "请先选择音频。");
             return;
         }
         Uri source = audio;
         int gain = volume.getProgress() + 10;
         audioOutput = null;
-        runTask(audioStatus, () -> {
+        runTask(Area.AUDIO, () -> {
             File file = new File(getCacheDir(), "prepared-shutter.wav");
             double seconds = ShutterAudio.prepare(this, source, gain, file);
             return () -> {
                 audioOutput = file;
-                audioStatus.setText(String.format(Locale.ROOT, "%.3f 秒 · 音量 %d%% · 可以试听或导出", seconds, gain));
+                setStatus(Area.AUDIO, String.format(Locale.ROOT, "%.3f 秒 · 音量 %d%% · 可以试听或导出", seconds, gain));
             };
         });
     }
@@ -420,12 +470,12 @@ public final class MainActivity extends Activity {
         String selection = lookLabel();
         String[] names = selection.equals("FL2-FL3") ? new String[]{"FL2", "FL3"} : new String[]{selection};
         looksOutput = null;
-        runTask(looksStatus, () -> {
+        runTask(Area.LOOKS, () -> {
             File file = new File(getCacheDir(), "prepared-looks.zip");
             Looks.generate(getContentResolver(), getAssets(), files, names, file);
             return () -> {
                 looksOutput = file;
-                looksStatus.setText(selection + " 已通过校验，可以导出。");
+                setStatus(Area.LOOKS, selection + " 已通过校验，可以导出。");
             };
         });
     }
@@ -439,7 +489,7 @@ public final class MainActivity extends Activity {
             player.start();
         } catch (Exception error) {
             stopPreview();
-            audioStatus.setText("试听失败：" + error.getMessage());
+            setStatus(Area.AUDIO, "试听失败：" + error.getMessage());
         }
     }
 
@@ -451,7 +501,7 @@ public final class MainActivity extends Activity {
     }
 
     private void pick(String type, int request) {
-        if (working) return;
+        if (working || checkingUsb) return;
         Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType(type);
         startActivityForResult(intent, request);
     }
@@ -470,18 +520,18 @@ public final class MainActivity extends Activity {
             audio = uri;
             audioOutput = null;
             stopPreview();
-            audioStatus.setText("已选择音频，可以生成。");
+            setStatus(Area.AUDIO, "已选择音频，可以生成。");
         } else if (request >= PICK_BACKUP && request < PICK_BACKUP + originals.length) {
             int index = request - PICK_BACKUP;
             originals[index] = uri;
             backupButtons[index].setText("已选择 · " + Looks.FILES[index]);
             looksOutput = null;
-            looksStatus.setText("生成时会核对所选文件。");
+            setStatus(Area.LOOKS, "生成时会核对所选文件。");
         } else if (request == EXPORT_AUDIO || request == EXPORT_LOOKS || request == EXPORT_CAMERA) {
             File file = request == EXPORT_AUDIO ? audioOutput : request == EXPORT_LOOKS ? looksOutput : cameraBackup;
-            TextView status = request == EXPORT_AUDIO ? audioStatus : request == EXPORT_LOOKS ? looksStatus : serviceStatus;
+            Area status = request == EXPORT_AUDIO ? Area.AUDIO : request == EXPORT_LOOKS ? Area.LOOKS : Area.SERVICE;
             if (file == null) {
-                status.setText("请重新生成后再导出。");
+                setStatus(status, "请重新生成后再导出。");
                 return;
             }
             runTask(status, () -> {
@@ -492,7 +542,7 @@ public final class MainActivity extends Activity {
                     int size;
                     while ((size = input.read(bytes)) != -1) output.write(bytes, 0, size);
                 }
-                return () -> status.setText("导出完成。");
+                return () -> setStatus(status, "导出完成。");
             });
         }
         refresh();
@@ -500,16 +550,16 @@ public final class MainActivity extends Activity {
 
     private interface Task { Runnable run() throws Exception; }
 
-    private void runTask(TextView status, Task task) {
+    private void runTask(Area status, Task task) {
         working = true;
-        status.setText("处理中…");
+        setStatus(status, "处理中…");
         refresh();
         new Thread(() -> {
             Runnable completion;
             try {
                 completion = task.run();
             } catch (Exception error) {
-                completion = () -> status.setText("操作失败：" + error.getLocalizedMessage());
+                completion = () -> setStatus(status, "操作失败：" + error.getLocalizedMessage());
             }
             Runnable result = completion;
             runOnUiThread(() -> {
@@ -523,8 +573,9 @@ public final class MainActivity extends Activity {
 
     private void refresh() {
         if (saveLooks == null) return;
-        chooseAudio.setEnabled(!working);
-        volume.setEnabled(!working);
+        chooseAudio.setEnabled(!working && !checkingUsb);
+        volume.setEnabled(!working && !checkingUsb);
+        writeCustom.setEnabled(!working && !checkingUsb && audioOutput != null);
         looks.setEnabled(!working);
         for (Button button : backupButtons) button.setEnabled(!working);
         preview.setEnabled(!working && audioOutput != null);
@@ -540,6 +591,29 @@ public final class MainActivity extends Activity {
         unregisterReceiver(usbPermission);
         stopPreview();
         super.onDestroy();
+    }
+
+    private void setStatus(Area area, String message) {
+        String text = area.label + " · " + message;
+        liveStatus.setText(text);
+        if (text.equals(statusLog.peekLast())) return;
+        if (statusLog.size() == 60) statusLog.removeFirst();
+        statusLog.addLast(text);
+    }
+
+    private void showLog() {
+        TextView log = new TextView(this);
+        log.setTextIsSelectable(true);
+        log.setTextSize(14);
+        log.setPadding(dp(20), dp(10), dp(20), dp(10));
+        StringBuilder lines = new StringBuilder();
+        java.util.Iterator<String> recent = statusLog.descendingIterator();
+        while (recent.hasNext()) lines.append(recent.next()).append("\n\n");
+        log.setText(lines);
+        ScrollView scroll = new ScrollView(this);
+        scroll.addView(log);
+        new AlertDialog.Builder(this).setTitle("本次操作日志").setView(scroll)
+                .setPositiveButton("关闭", null).show();
     }
 
     private void section(LinearLayout page, String title) {

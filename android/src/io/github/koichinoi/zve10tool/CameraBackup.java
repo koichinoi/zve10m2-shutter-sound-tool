@@ -11,11 +11,12 @@ final class CameraBackup {
             "/cp/SysSound.bin", "/usr/lib/libJiritsu.so"};
     private static final int[] SIZES = {93620512, 17387368, 76992, 237512};
 
-    static void create(SonyService service, File archive) throws Exception {
+    static void create(SonyService service, File archive, java.util.function.Consumer<String> progress) throws Exception {
         byte[][] hashes = new byte[FILES.length][];
         try (ZipOutputStream zip = new ZipOutputStream(new BufferedOutputStream(new FileOutputStream(archive)))) {
             zip.setLevel(1);
             for (int i = 0; i < FILES.length; i++) {
+                progress.accept("备份 " + (i + 1) + "/" + FILES.length + " · " + new File(FILES[i]).getName());
                 zip.putNextEntry(new ZipEntry(FILES[i].substring(1)));
                 MessageDigest digest = MessageDigest.getInstance("SHA-256");
                 service.readFile(FILES[i], SIZES[i], new DigestOutputStream(zip, digest));
@@ -23,6 +24,7 @@ final class CameraBackup {
                 hashes[i] = digest.digest();
             }
         }
+        progress.accept("正在校验备份 ZIP…");
         try (ZipFile zip = new ZipFile(archive)) {
             if (zip.size() != FILES.length) throw new IOException("备份文件数量不匹配");
             byte[] buffer = new byte[32768];

@@ -29,11 +29,31 @@ final class MobileSound {
         return manifest(context).getString("name");
     }
 
-    static File install(Context context, SonyService service) throws Exception {
+    static File install(Context context, SonyService service, File customWav,
+                        java.util.function.Consumer<String> progress) throws Exception {
         if (android.os.Build.VERSION.SDK_INT < 28) throw new IOException("快门音写入需要 Android 9 或更高版本");
         File pending = new File(context.getFilesDir(), "mobile-sound.pending");
         if (pending.exists()) throw new IOException("有未确认的写入，请保留应用数据");
-        JSONObject manifest = manifest(context);
+        File folder = new File(context.getFilesDir(), "sound-" + java.util.UUID.randomUUID());
+        if (!folder.mkdir()) throw new IOException("无法创建本地备份目录");
+        File backup = new File(folder, "camera-backup.zip");
+        CameraBackup.create(service, backup, progress);
+        progress.accept("正在核对相机状态并准备写入…");
+        JSONObject manifest;
+        byte[] audio, worker;
+        if (customWav == null) {
+            manifest = manifest(context);
+            audio = asset(context, ASSET, "audio.bin", 15360);
+            worker = asset(context, ASSET, "worker.so", 65536);
+        } else {
+            try (ZipFile zip = new ZipFile(backup)) {
+                CustomSound.Plan plan = CustomSound.prepare(context, zip, customWav);
+                manifest = plan.manifest;
+                audio = plan.audio;
+                worker = plan.worker;
+            }
+        }
+
         JSONObject pins = manifest.getJSONObject("pins");
         String targetApp = manifest.getString("target_app");
         String oldAudio = audioPath(manifest.getString("old_audio"));
@@ -41,8 +61,8 @@ final class MobileSound {
         String result = manifest.getString("result");
         if (!result.matches("/tmp/jiritsu/zvs_mobile_[0-9a-f]{16}\\.result")) throw new IOException("结果路径无效");
         String stage = result.replace(".result", ".stage.so");
-        byte[] audio = asset(context, "audio.bin", 15360);
-        byte[] worker = asset(context, "worker.so", 65536);
+
+
         checkHash(audio, manifest.getString("audio_hash"), "目标音频");
         checkHash(worker, manifest.getString("worker_hash"), "写入程序");
         byte[] old = service.readSmall(oldAudio, 16384, false);
@@ -55,10 +75,6 @@ final class MobileSound {
         byte[] existing = service.readSmall(audioPath, 16384, true);
         if (existing != null && !Arrays.equals(audio, existing)) throw new IOException("目标音频路径已有不同内容");
 
-        File folder = new File(context.getFilesDir(), "sound-" + java.util.UUID.randomUUID());
-        if (!folder.mkdir()) throw new IOException("无法创建本地备份目录");
-        File backup = new File(folder, "camera-backup.zip");
-        CameraBackup.create(service, backup);
         try (ZipFile zip = new ZipFile(backup)) {
             for (Iterator<String> it = pins.keys(); it.hasNext();) {
                 String path = it.next();
@@ -76,16 +92,19 @@ final class MobileSound {
         if (!pending.createNewFile()) throw new IOException("无法锁定写入记录");
         save(pending, folder.getName().getBytes(StandardCharsets.UTF_8));
 
+        progress.accept("正在写入音频并回读…");
         if (existing == null) service.putFile(audioPath, audio, false);
         if (!Arrays.equals(audio, service.readSmall(audioPath, 16384, false))) throw new IOException("音频回读失败");
         service.putFile(stage, worker, true);
         if (!Arrays.equals(worker, service.readSmall(stage, 65536, false))) throw new IOException("辅助文件回读失败");
+        progress.accept("正在更新快门加载程序，请保持连接…");
         service.putFile(HELPER, worker, true);
         byte[] report = service.readSmall(result, 136, false);
         save(new File(folder, "camera-result.bin"), report);
         verifyReport(report);
         for (Iterator<String> it = pins.keys(); it.hasNext();) {
             String path = it.next();
+            progress.accept("写后回读 · " + new File(path).getName());
             JSONArray pin = pins.getJSONArray(path);
             String expected = APP.equals(path) ? targetApp : pin.getString(1);
             MessageDigest digest = MessageDigest.getInstance("SHA-256");
@@ -97,8 +116,10 @@ final class MobileSound {
         }
         if (!Arrays.equals(audio, service.readSmall(audioPath, 16384, false))
                 || !Arrays.equals(old, service.readSmall(oldAudio, 16384, false))) throw new IOException("声音文件核对失败");
+        progress.accept("回读通过，正在清理辅助文件…");
         service.removeHelper(stage, worker);
         service.removeHelper(HELPER, worker);
+        if (customWav != null) CustomSound.recordState(context, manifest);
         if (!pending.delete()) throw new IOException("写入已校验，但未能清除本地记录");
         return backup;
     }
@@ -133,11 +154,11 @@ final class MobileSound {
     }
 
     private static JSONObject manifest(Context context) throws Exception {
-        return new JSONObject(new String(asset(context, "manifest.json", 8192), StandardCharsets.UTF_8));
+        return new JSONObject(new String(asset(context, ASSET, "manifest.json", 8192), StandardCharsets.UTF_8));
     }
 
-    private static byte[] asset(Context context, String name, int limit) throws IOException {
-        try (InputStream input = context.getAssets().open(ASSET + name)) {
+    static byte[] asset(Context context, String root, String name, int limit) throws IOException {
+        try (InputStream input = context.getAssets().open(root + name)) {
             ByteArrayOutputStream bytes = new ByteArrayOutputStream();
             byte[] block = new byte[4096];
             int count;
@@ -156,7 +177,7 @@ final class MobileSound {
         }
     }
 
-    private static void checkHash(byte[] bytes, String expected, String label) throws Exception {
+    static void checkHash(byte[] bytes, String expected, String label) throws Exception {
         if (!expected.equals(hex(MessageDigest.getInstance("SHA-256").digest(bytes)))) {
             throw new IOException(label + "校验失败");
         }
@@ -170,7 +191,7 @@ final class MobileSound {
         return hex(digest.digest());
     }
 
-    private static String hex(byte[] bytes) {
+    static String hex(byte[] bytes) {
         StringBuilder result = new StringBuilder();
         for (byte value : bytes) {
             result.append(Character.forDigit((value >>> 4) & 15, 16));

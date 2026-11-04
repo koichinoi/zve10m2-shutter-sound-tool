@@ -4,7 +4,8 @@ param(
     [Parameter(Mandatory)] [string] $BuildTools,
     [string] $ServiceAuth,
     [string] $PreparedSound,
-    [string] $Output = (Join-Path $PSScriptRoot 'build/ZVE10-II-Android-0.1.7.apk')
+    [string] $CustomSound,
+    [string] $Output = (Join-Path $PSScriptRoot 'build/ZVE10-II-Android-0.1.9.apk')
 )
 
 $ErrorActionPreference = 'Stop'
@@ -58,6 +59,12 @@ try {
             # Android AssetManager requires forward slashes inside the APK.
             $file = (Resolve-Path -LiteralPath (Join-Path $PreparedSound $name)).Path
             [IO.Compression.ZipFileExtensions]::CreateEntryFromFile($apk, $file, "assets/prepared-sound/$name") | Out-Null
+        }
+    }
+    if ($CustomSound) {
+        foreach ($name in 'manifest.json', 'worker.so', 'guard.bin') {
+            $file = (Resolve-Path -LiteralPath (Join-Path $CustomSound $name)).Path
+            [IO.Compression.ZipFileExtensions]::CreateEntryFromFile($apk, $file, "assets/custom-sound/$name") | Out-Null
         }
     }
 } finally { $apk.Dispose() }

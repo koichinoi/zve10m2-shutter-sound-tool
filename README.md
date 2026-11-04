@@ -6,6 +6,12 @@
 
 ![ZV-E10M2 快门声音工具 v0.3.0 界面](assets/shutter-tool-v0.3.0.jpg)
 
+## 安卓测试版
+
+[下载公开 APK](android/downloads/ZVE10-II-Android-0.1.6-public.apk) · [安卓使用说明和源码](android/README.md)
+
+公开版可处理快门音、生成 FL2／FL3 外观文件和检测 USB。相机服务模式和预制快门音写入需本地构建。
+
 ## 适用范围
 
 适用于 Sony ZV-E10M2 固件 1.02，以及工具已记录和核验的相机状态。程序会检查主程序、色彩程序、声音包和当前音频。相同机型和固件号仍需通过文件校验。

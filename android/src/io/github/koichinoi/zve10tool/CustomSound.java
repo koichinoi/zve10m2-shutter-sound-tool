@@ -90,7 +90,7 @@ final class CustomSound {
         return new Plan(manifest, audio, worker);
     }
 
-    private static JSONObject findState(Context context, JSONArray known, String app) throws Exception {
+    static JSONObject findState(Context context, JSONArray known, String app) throws Exception {
         for (int i = 0; i < known.length(); i++) {
             JSONObject entry = known.getJSONObject(i);
             if (app.equals(entry.getString("app"))) return entry;

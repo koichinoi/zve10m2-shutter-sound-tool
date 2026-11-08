@@ -19,7 +19,7 @@ class App:
         heading=ttk.Frame(frame);heading.pack(fill='x')
         ttk.Label(heading,text='把喜欢的声音，变成快门声',style='Title.TLabel').pack(side='left')
         self.button(heading,'FL2／FL3 外观',self.open_filters).pack(side='right')
-        ttk.Label(frame,text='ZV-E10M2 · 固件 1.02 · v0.3.1',foreground='#59687b').pack(anchor='w',pady=(6,22))
+        ttk.Label(frame,text='ZV-E10M2 · 固件 1.02 · v0.3.4',foreground='#59687b').pack(anchor='w',pady=(6,22))
         ttk.Label(frame,text='1   选择音频',font=('Microsoft YaHei UI',12,'bold')).pack(anchor='w')
         row=ttk.Frame(frame);row.pack(fill='x',pady=9)
         self.source=tk.StringVar(value='尚未选择音频')
@@ -86,9 +86,9 @@ class App:
     def preview(self):
         state=json.loads(Path(self.prepared).read_text(encoding='utf-8'))
         winsound.PlaySound(state['preview'],winsound.SND_FILENAME|winsound.SND_ASYNC)
-    def confirm(self,action):
-        if not self.power.get():messagebox.showinfo('电量','请确认电量超过 50%，再勾选电量确认。');return False
-        return messagebox.askokcancel(action,'将自动核对相机并保存备份，然后'+action+'。\n\n操作期间请保持供电和 USB 连接。\n\n是否开始？')
+    def confirm(self,action,parent=None):
+        if not self.power.get():messagebox.showinfo('电量','请确认电量超过 50%，再勾选电量确认。',parent=parent);return False
+        return messagebox.askokcancel(action,'将自动核对相机并保存备份，然后'+action+'。\n\n操作期间请保持供电和 USB 连接。\n\n是否开始？',parent=parent)
     def install(self):
         if self.prepared and self.confirm('写入所选声音'):self.start(['install',self.prepared,'--power-confirmed'])
     def restore(self):
@@ -156,6 +156,23 @@ class App:
                 self.start(['install-filters','--power-confirmed'])
 
         ttk.Button(actions,text='导入两套到相机',command=import_camera,style='Accent.TButton').pack(side='right')
+        ttk.Separator(frame).pack(fill='x',pady=12)
+        ttk.Label(frame,text='相机左侧图标',font=('Microsoft YaHei UI',11,'bold')).pack(anchor='w')
+        ttk.Label(frame,text='检查两套显示资源，再按需更新原 IN／SH 图标。').pack(anchor='w',pady=(4,8))
+        icon_actions=ttk.Frame(frame)
+        icon_actions.pack(fill='x')
+
+        def check_icons():
+            dialog.destroy()
+            self.start(['check-icons'])
+
+        def update_icons():
+            if self.confirm('更新 FL2／FL3 图标',parent=dialog):
+                dialog.destroy()
+                self.start(['install-icons','--power-confirmed'])
+
+        ttk.Button(icon_actions,text='检查相机图标',command=check_icons).pack(side='left')
+        ttk.Button(icon_actions,text='更新相机图标',command=update_icons,style='Accent.TButton').pack(side='right')
         dialog.grab_set()
         dialog.focus_set()
 
@@ -191,6 +208,8 @@ class App:
                     elif value.startswith(('检测到 Sony USB','未检测到 Sony USB')):
                         self.result.set(value.split('；',1)[0])
                     elif value.startswith(('外观文件已生成：','FL2／FL3 已导入','相机已安装 FL2／FL3')):
+                        self.result.set(value)
+                    elif value.startswith(('图标资源：','相机图标资源已更新','图标更新和回读通过','正在更新并回读图标')):
                         self.result.set(value)
                     elif value.startswith('写入并回读成功'):
                         self.result.set('写入成功。拔线关机，等指示灯熄灭后取电池一分钟，再开机试听。')

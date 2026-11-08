@@ -175,8 +175,12 @@ class CameraIO:
         # Dedicated module instance: the historical diagnostic allowlist stays unchanged.
         self.reader=module('tool_segmented_reader',RESEARCH/'segmented_read_transport.py')
         self.reader.PATHS=frozenset(paths)
+    def allow_shutter_read(self,path):
+        if not re.fullmatch(r'/cp/(?:zvs_[0-9a-f]{16}|zve10m2_project11_full)\.bin',path):
+            raise ValueError('当前快门音路径不属于工具的专用范围')
+        self.reader.PATHS |= {path}
     def read(self,path,limit,optional=False):
-        if path not in self.paths:raise ValueError('读取路径未授权')
+        if path not in self.reader.PATHS:raise ValueError('读取路径未授权')
         try:
             self.reader.exchange(self.camera.dev,self.reader.select_request(path),4,self.events)
             return self.reader.exchange(self.camera.dev,self.reader.READ,limit+4,self.events)
@@ -326,6 +330,8 @@ def main():
     a=s.add_parser('restore');a.add_argument('--power-confirmed',action='store_true')
     a=s.add_parser('factory');a.add_argument('--power-confirmed',action='store_true')
     a=s.add_parser('install-filters');a.add_argument('--power-confirmed',action='store_true')
+    s.add_parser('check-icons')
+    a=s.add_parser('install-icons');a.add_argument('--power-confirmed',action='store_true')
     a=s.add_parser('detect')
     args=p.parse_args()
     try:
@@ -334,6 +340,10 @@ def main():
         elif args.command=='install-filters':
             import filter_install
             with_camera_lock(lambda:filter_install.install(sys.modules[__name__],args.power_confirmed))
+        elif args.command in ('check-icons','install-icons'):
+            import icon_install
+            with_camera_lock(lambda:icon_install.run(sys.modules[__name__],args.command=='install-icons',
+                                                    getattr(args,'power_confirmed',False)))
         elif args.command=='factory':install('factory',args.power_confirmed)
         elif args.command=='restore':
             if not (ROOT/'previous.json').exists():raise ValueError('还没有用本工具替换过声音，因此没有上一版可恢复')

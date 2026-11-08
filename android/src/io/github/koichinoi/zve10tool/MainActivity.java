@@ -70,9 +70,11 @@ public final class MainActivity extends Activity {
     private static final String WRITE_TEST_PERMISSION = USB_PERMISSION + ".WRITE_TEST";
     private static final String SOUND_PERMISSION = USB_PERMISSION + ".SOUND";
     private static final String CUSTOM_PERMISSION = USB_PERMISSION + ".CUSTOM";
+    private static final String LOOKS_PERMISSION = USB_PERMISSION + ".LOOKS";
+    private static final String ICONS_PERMISSION = USB_PERMISSION + ".ICONS";
     private enum ServiceAction {
         DETECT("相机服务模式检测", SERVICE_PERMISSION), BACKUP("备份相机文件", BACKUP_PERMISSION),
-        WRITE_TEST("测试临时写入", WRITE_TEST_PERMISSION), SOUND("写入预制快门音", SOUND_PERMISSION), CUSTOM("写入自定义快门音", CUSTOM_PERMISSION);
+        WRITE_TEST("测试临时写入", WRITE_TEST_PERMISSION), SOUND("写入预制快门音", SOUND_PERMISSION), CUSTOM("写入自定义快门音", CUSTOM_PERMISSION), LOOKS("导入 FL2／FL3 到相机", LOOKS_PERMISSION), ICONS("更新相机 FL2／FL3 图标", ICONS_PERMISSION);
         final String label, permission;
         ServiceAction(String label, String permission) {
             this.label = label;
@@ -88,6 +90,8 @@ public final class MainActivity extends Activity {
             if (WRITE_TEST_PERMISSION.equals(intent.getAction())) checkService(false, ServiceAction.WRITE_TEST);
             if (SOUND_PERMISSION.equals(intent.getAction())) checkService(false, ServiceAction.SOUND);
             if (CUSTOM_PERMISSION.equals(intent.getAction())) checkService(false, ServiceAction.CUSTOM);
+            if (LOOKS_PERMISSION.equals(intent.getAction())) checkService(false, ServiceAction.LOOKS);
+            if (ICONS_PERMISSION.equals(intent.getAction())) checkService(false, ServiceAction.ICONS);
         }
     };
 
@@ -100,6 +104,8 @@ public final class MainActivity extends Activity {
         filter.addAction(WRITE_TEST_PERMISSION);
         filter.addAction(SOUND_PERMISSION);
         filter.addAction(CUSTOM_PERMISSION);
+        filter.addAction(LOOKS_PERMISSION);
+        filter.addAction(ICONS_PERMISSION);
         if (Build.VERSION.SDK_INT >= 33) registerReceiver(usbPermission, filter, RECEIVER_NOT_EXPORTED);
         else registerReceiver(usbPermission, filter);
 
@@ -133,7 +139,7 @@ public final class MainActivity extends Activity {
         identity.addView(nameplate, new LinearLayout.LayoutParams(0, -2, 1));
         TextView title = label(nameplate, "ZV-E10 II 相机工具", 19, true);
         title.setTextColor(Color.WHITE);
-        label(nameplate, "固件 1.02  ·  安卓 0.2.1", 12, false).setTextColor(0xffffcddd);
+        label(nameplate, "固件 1.02  ·  安卓 0.2.5", 12, false).setTextColor(0xffffcddd);
         Button history = new Button(this, null, android.R.attr.borderlessButtonStyle);
         history.setText("日志");
         history.setMinWidth(0);
@@ -235,6 +241,16 @@ public final class MainActivity extends Activity {
         saveLooks = action(page, "导出外观 ZIP", false, false, view ->
                 export("application/zip", "ZVE10M2-" + lookLabel() + ".zip", EXPORT_LOOKS));
 
+        if (MobileLooks.available(this)) {
+            button(page, "导入 FL2／FL3 到相机", view -> checkService(true, ServiceAction.LOOKS));
+            label(page, "导入时会备份相机，并一起更新原 IN／SH 的成像效果。", 13, false);
+        }
+
+        if (MobileIcons.available(this)) {
+            button(page, "更新相机 FL2／FL3 图标", view -> checkService(true, ServiceAction.ICONS));
+            label(page, "适用于已装好 FL2／FL3 的相机。更新列表左侧原 IN／SH 图标。", 13, false);
+        }
+
         LinearLayout cameraPage = screen(content, 2);
         page = card(cameraPage);
         section(page, "USB 相机连接");
@@ -295,7 +311,19 @@ public final class MainActivity extends Activity {
         }
         UsbDevice selected = camera;
         if (SonyService.isService(selected)) {
-            if (action == ServiceAction.SOUND || action == ServiceAction.CUSTOM) {
+            if (action == ServiceAction.LOOKS || action == ServiceAction.ICONS) {
+                if (ask) {
+                    new AlertDialog.Builder(this).setTitle(action.label)
+                            .setMessage(action == ServiceAction.ICONS
+                                    ? "将备份相机的图标资源，再更新左侧 IN／SH 图标。请保持数据线连接。"
+                                    : "将先核对相机状态并备份，再替换原 IN／SH 的成像数据。请保持数据线连接。")
+                            .setNegativeButton("取消", null)
+                            .setPositiveButton("电量超过 50%，继续", (dialog, button) -> runService(selected, false, action))
+                            .show();
+                } else {
+                    setStatus(Area.LOOKS, "已授权。再次点击「" + action.label + "」并确认。");
+                }
+            } else if (action == ServiceAction.SOUND || action == ServiceAction.CUSTOM) {
                 if (ask) confirmSound(selected, action);
                 else setStatus(Area.SERVICE, "已授权。再次点击「" + action.label + "」并确认。");
             } else if (action != ServiceAction.WRITE_TEST) {
@@ -348,7 +376,7 @@ public final class MainActivity extends Activity {
         }
         checkingUsb = true;
         refresh();
-        if ((backup || sound) && !switching) {
+        if ((backup || sound || action == ServiceAction.LOOKS || action == ServiceAction.ICONS) && !switching) {
             getWindow().addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         }
         retryUsb.setVisibility(View.GONE);
@@ -392,6 +420,14 @@ public final class MainActivity extends Activity {
                             } else if (action == ServiceAction.WRITE_TEST) {
                                 service.testTemporaryWrite();
                                 message = "临时写入、逐字节回读和删除均成功。";
+                            } else if (action == ServiceAction.ICONS) {
+                                boolean installed = MobileIcons.install(this, service, progress);
+                                message = installed ? "图标更新和回读通过，请重启相机查看左侧列表。"
+                                        : "相机图标已是 FL2／FL3，已跳过写入。";
+                            } else if (action == ServiceAction.LOOKS) {
+                                boolean installed = MobileLooks.install(this, service, progress);
+                                message = installed ? "FL2／FL3 导入和回读通过，请重启相机检查原 IN／SH。"
+                                        : "相机已安装 FL2／FL3，已核对并跳过写入。";
                             } else if (sound) {
                                 completedBackup = MobileSound.install(this, service, customWav, progress);
                                 message = "快门音写入和回读通过。拔线，关机等读写灯熄灭，取出电池一分钟，再开机试听。";
@@ -402,8 +438,8 @@ public final class MainActivity extends Activity {
                     }
                 }
             } catch (Exception error) {
-                message = sound && !switching
-                        ? "快门音未确认完成：" + error.getLocalizedMessage() + "。请保留应用数据和提示。"
+                message = (sound || action == ServiceAction.LOOKS || action == ServiceAction.ICONS) && !switching
+                        ? "相机操作未确认完成：" + error.getLocalizedMessage() + "。请保留应用数据和提示。"
                         : "服务检测未完成：" + error.getLocalizedMessage() + "。若相机已切换，可重新检测。";
             }
             String status = message;

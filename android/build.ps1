@@ -5,7 +5,11 @@ param(
     [string] $ServiceAuth,
     [string] $PreparedSound,
     [string] $CustomSound,
-    [string] $Output = (Join-Path $PSScriptRoot 'build/ZVE10-II-Android-0.2.1.apk')
+    [string] $CameraLooks,
+    [string] $CameraIcons,
+    [string] $ExtraCameraIcons,
+    [string] $Display32CameraIcons,
+    [string] $Output = (Join-Path $PSScriptRoot 'build/ZVE10-II-Android-0.2.5.apk')
 )
 
 $ErrorActionPreference = 'Stop'
@@ -65,6 +69,39 @@ try {
         foreach ($name in 'manifest.json', 'worker.so', 'guard.bin') {
             $file = (Resolve-Path -LiteralPath (Join-Path $CustomSound $name)).Path
             [IO.Compression.ZipFileExtensions]::CreateEntryFromFile($apk, $file, "assets/custom-sound/$name") | Out-Null
+        }
+    }
+    if ($CameraLooks) {
+        foreach ($name in 'manifest.json', 'cp.so', 'wbi.so', 'restore.so') {
+            $file = (Resolve-Path -LiteralPath (Join-Path $CameraLooks $name)).Path
+            [IO.Compression.ZipFileExtensions]::CreateEntryFromFile($apk, $file, "assets/camera-looks/$name") | Out-Null
+        }
+    }
+    if ($CameraIcons) {
+        $names = @('manifest.json') + @(1..4 | ForEach-Object { "install$_.so"; "restore$_.so" })
+        foreach ($name in $names) {
+            $file = (Resolve-Path -LiteralPath (Join-Path $CameraIcons $name)).Path
+            [IO.Compression.ZipFileExtensions]::CreateEntryFromFile($apk, $file, "assets/camera-icons/$name") | Out-Null
+        }
+    }
+    if ($ExtraCameraIcons) {
+        if (!$CameraIcons) { throw 'Extra camera icons require the base icon resources' }
+        foreach ($bank in 1, 2) {
+            foreach ($name in 'manifest.json', 'install1.so', 'restore1.so') {
+                $file = (Resolve-Path -LiteralPath (Join-Path $ExtraCameraIcons "bank$bank/workers/$name")).Path
+                [IO.Compression.ZipFileExtensions]::CreateEntryFromFile($apk, $file, "assets/camera-icons/extra$bank/$name") | Out-Null
+            }
+        }
+    }
+    if ($Display32CameraIcons) {
+        if (!$CameraIcons -or !$ExtraCameraIcons) { throw '32_IPSX requires the 23_IPSX icon resources' }
+        foreach ($bank in 1, 2) {
+            $count = if ($bank -eq 1) { 4 } else { 1 }
+            $names = @('manifest.json') + @(1..$count | ForEach-Object { "install$_.so"; "restore$_.so" })
+            foreach ($name in $names) {
+                $file = (Resolve-Path -LiteralPath (Join-Path $Display32CameraIcons "bank$bank/workers/$name")).Path
+                [IO.Compression.ZipFileExtensions]::CreateEntryFromFile($apk, $file, "assets/camera-icons/display32b$bank/$name") | Out-Null
+            }
         }
     }
 } finally { $apk.Dispose() }

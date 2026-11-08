@@ -1,16 +1,16 @@
-# ZV-E10M2 快门声音工具 v0.3.1
+# ZV-E10M2 快门声音工具 v0.3.4
 
 在 Windows 上生成、试听和写入自定义快门音，也可以恢复上一个声音或原厂声音。
 
 [详细使用说明](使用说明.md) · [配置示例](config.example.json) · [原厂恢复离线测试](factory_verification.json)
 
-![ZV-E10M2 快门声音工具 v0.3.0 界面](assets/shutter-tool-v0.3.0.jpg)
+![ZV-E10M2 快门声音工具 v0.3.4 界面](assets/shutter-tool-v0.3.4.jpg)
 
 ## 安卓测试版
 
-[下载公开 APK](android/downloads/ZVE10-II-Android-0.2.1-public.apk) · [安卓使用说明和源码](android/README.md)
+[下载 0.2.5 公开 APK](android/downloads/ZVE10-II-Android-0.2.5-public.apk) · [安卓使用说明和源码](android/README.md)
 
-公开版可处理快门音、生成 FL2／FL3 外观文件和检测 USB。相机服务模式和预制快门音写入需本地构建。
+公开版可处理快门音、生成 FL2／FL3 外观文件和检测 USB。通过服务模式备份、写入快门音、导入外观及更新相机图标需要带本地资源的构建。
 
 ## 适用范围
 
@@ -20,9 +20,11 @@
 
 ## FL2／FL3 创意外观
 
-![FL2／FL3 外观生成与相机导入界面](assets/fl2-fl3-tool-v0.3.1.png)
+![FL2／FL3 外观、相机导入与图标更新界面](assets/fl2-fl3-tool-v0.3.4.jpg)
 
 点击软件右上角「FL2／FL3 外观」可从匹配的原始备份生成两套外观文件。同一窗口也可以将已核对的两套外观导入匹配的相机。成像差分和用法见 [FL2／FL3 外观数据](filters/README.md)。
+
+Windows 0.3.4 新增左侧图标检查和更新，覆盖 `23_IPSX` 与 `32_IPSX` 两套资源。机主已确认更新后左侧 FL2／FL3 显示正常。安卓 0.2.5 本地测试版使用同一套资源，安卓图标写入待实机验证。
 
 ## 快速上手
 

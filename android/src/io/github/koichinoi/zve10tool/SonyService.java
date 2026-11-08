@@ -192,13 +192,25 @@ final class SonyService implements AutoCloseable {
     }
 
     private void exchange(byte[] payload, int limit, OutputStream target) throws IOException {
+        exchange(payload, limit, target, true);
+    }
+
+    byte[] adjust(byte[] payload, int limit) throws IOException {
+        if (switching || payload.length < 4 || payload[0] != 3 || payload[1] != 6)
+            throw new IOException("相机设置请求无效");
+        ByteArrayOutputStream reply = new ByteArrayOutputStream();
+        exchange(payload, limit, reply, false);
+        return reply.toByteArray();
+    }
+
+    private void exchange(byte[] payload, int limit, OutputStream target, boolean jiritsu) throws IOException {
         if (!usable) throw new IOException("USB 会话中断，未重试");
         usable = false;
         ByteBuffer request = ByteBuffer.allocate(12 + payload.length).order(ByteOrder.LITTLE_ENDIAN);
         request.putInt(payload.length).putShort((short) 0x40).putShort((short) sequence).putInt(0).put(payload);
         send(request.array());
         int chunkSize = android.os.Build.VERSION.SDK_INT >= 28 ? 0x8000 : 0x4000;
-        int result = readReply(this::read, sequence, limit, chunkSize, target);
+        int result = readReply(this::read, sequence, limit, chunkSize, target, jiritsu);
         sequence++;
         usable = true;
         if (result != 0) throw new ResultError(result);
@@ -208,20 +220,20 @@ final class SonyService implements AutoCloseable {
         byte[] read(int count) throws IOException;
     }
 
-    static int readReply(PacketReader reader, int sequence, int limit, int chunkSize, OutputStream target)
+    static int readReply(PacketReader reader, int sequence, int limit, int chunkSize, OutputStream target, boolean jiritsu)
             throws IOException {
         int remaining = -1;
         int result = 0;
         do {
             ByteBuffer header = ByteBuffer.wrap(reader.read(12)).order(ByteOrder.LITTLE_ENDIAN);
             int size = header.getInt();
-            if (size < 1 || size > limit || (remaining >= 0 && size != remaining)
+            if (size < 0 || (jiritsu && size == 0) || size > limit || (remaining >= 0 && size != remaining)
                     || header.getShort() != 0x40 || header.getShort() != sequence
                     || (header.getInt() >>> 24) != 0) throw new IOException("服务回复头无效");
             int segment = Math.min(size, 0x100000);
             for (int offset = 0; offset < segment; offset += chunkSize) {
                 byte[] chunk = reader.read(Math.min(chunkSize, segment - offset));
-                if (remaining < 0 && offset == 0) {
+                if (jiritsu && remaining < 0 && offset == 0) {
                     if (chunk.length < 4) throw new IOException("服务回复缺少结果");
                     result = ByteBuffer.wrap(chunk).order(ByteOrder.LITTLE_ENDIAN).getInt();
                     if (result == 0 && target != null) target.write(chunk, 4, chunk.length - 4);

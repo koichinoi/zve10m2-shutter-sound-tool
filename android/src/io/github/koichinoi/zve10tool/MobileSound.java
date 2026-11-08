@@ -33,7 +33,9 @@ final class MobileSound {
                         java.util.function.Consumer<String> progress) throws Exception {
         if (android.os.Build.VERSION.SDK_INT < 28) throw new IOException("快门音写入需要 Android 9 或更高版本");
         File pending = new File(context.getFilesDir(), "mobile-sound.pending");
-        if (pending.exists()) throw new IOException("有未确认的写入，请保留应用数据");
+        if (pending.exists() || new File(context.getFilesDir(), MobileLooks.PENDING).exists()
+                || new File(context.getFilesDir(), MobileIcons.PENDING).exists())
+            throw new IOException("有未确认的写入，请保留应用数据");
         File folder = new File(context.getFilesDir(), "sound-" + java.util.UUID.randomUUID());
         if (!folder.mkdir()) throw new IOException("无法创建本地备份目录");
         File backup = new File(folder, "camera-backup.zip");
@@ -125,6 +127,10 @@ final class MobileSound {
     }
 
     static void verifyReport(byte[] report) throws IOException {
+        verifyReport(report, 3);
+    }
+
+    static void verifyReport(byte[] report, int windows) throws IOException {
         if (report.length != 136) throw new IOException("相机结果长度不匹配");
         ByteBuffer data = ByteBuffer.wrap(report).order(ByteOrder.LITTLE_ENDIAN);
         String magic = new String(report, 0, 8, StandardCharsets.US_ASCII);
@@ -133,7 +139,7 @@ final class MobileSound {
         if (!magic.equals("ZVBINS01") || data.getInt(8) != 1 || data.getInt(12) != 30
                 || data.getLong(16) != 0 || data.getLong(24) != 0 || data.getLong(32) != 0
                 || data.getLong(40) != 0 || data.getLong(64) != 512 || data.getLong(72) == 0
-                || data.getLong(80) == 0 || data.getInt(88) != 3 || data.getInt(92) != 3
+                || data.getLong(80) == 0 || data.getInt(88) != windows || data.getInt(92) != windows
                 || data.getInt(96) != 0 || data.getInt(100) != 0
                 || !(before.equals("0\n") || before.equals("2\n")) || !after.equals("0\n")) {
             throw new IOException("相机未确认写入完成");

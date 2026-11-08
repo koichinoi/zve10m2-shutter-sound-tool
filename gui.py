@@ -6,64 +6,137 @@ from filters.apply_offline import apply_profiles
 
 ROOT=Path(sys.executable).resolve().parent if getattr(sys,'frozen',False) else Path(__file__).resolve().parent
 CFG=json.loads((ROOT/'config.json').read_text(encoding='utf-8'))
+ASSETS=Path(getattr(sys,'_MEIPASS',Path(__file__).resolve().parent))
+PAPER='#fff6f5'
+SURFACE='#ffffff'
+INK='#38232e'
+MUTED='#745461'
+ACCENT='#9a2146'
+HEADER='#45192b'
+BLUSH='#ffe8ee'
+BORDER='#ecd8de'
 
 class App:
     def __init__(self,root):
-        self.root=root;root.title('快门声音 · ZV-E10 II');root.geometry('820x620');root.minsize(760,600)
-        root.configure(bg='#f4f6f8');self.q=queue.Queue();self.busy=False;self.prepared=None;self.buttons=[]
-        style=ttk.Style();style.theme_use('clam');style.configure('.',font=('Microsoft YaHei UI',10))
-        style.configure('TFrame',background='#f4f6f8');style.configure('TLabel',background='#f4f6f8')
-        style.configure('Title.TLabel',font=('Microsoft YaHei UI',23,'bold'),foreground='#182b43')
-        style.configure('TButton',padding=(13,9));style.configure('Accent.TButton',background='#245ad7',foreground='white')
-        frame=ttk.Frame(root,padding=26);frame.pack(fill='both',expand=True)
-        heading=ttk.Frame(frame);heading.pack(fill='x')
-        ttk.Label(heading,text='把喜欢的声音，变成快门声',style='Title.TLabel').pack(side='left')
+        self.root=root;root.title('ZV-E10 II 相机工具');root.geometry('860x650');root.minsize(770,620)
+        root.configure(bg=PAPER);self.q=queue.Queue();self.busy=False;self.prepared=None;self.buttons=[]
+        self.configure_styles()
+        frame=ttk.Frame(root,padding=20);frame.pack(fill='both',expand=True)
+
+        heading=ttk.Frame(frame,style='Header.TFrame',padding=(16,13));heading.pack(fill='x')
+        icon_path=ASSETS/'android/res/mipmap-xxxhdpi/ic_launcher.png'
+        if icon_path.is_file():
+            icon=tk.PhotoImage(file=icon_path)
+            root.iconphoto(True,icon)
+            self.mascot=icon.subsample(4)
+            ttk.Label(heading,image=self.mascot,style='Header.TLabel').pack(side='left',padx=(0,12))
+        titles=ttk.Frame(heading,style='Header.TFrame');titles.pack(side='left',fill='x',expand=True)
+        ttk.Label(titles,text='ZV-E10 II 相机工具',style='Title.TLabel').pack(anchor='w')
+        ttk.Label(titles,text='固件 1.02  ·  Windows 0.3.5',style='Header.TLabel').pack(anchor='w')
         self.button(heading,'FL2／FL3 外观',self.open_filters).pack(side='right')
-        ttk.Label(frame,text='ZV-E10M2 · 固件 1.02 · v0.3.4',foreground='#59687b').pack(anchor='w',pady=(6,22))
-        ttk.Label(frame,text='1   选择音频',font=('Microsoft YaHei UI',12,'bold')).pack(anchor='w')
-        row=ttk.Frame(frame);row.pack(fill='x',pady=9)
+
+        status=self.card(frame)
+        status_row=ttk.Frame(status,style='Card.TFrame');status_row.pack(fill='x')
+        status_text=ttk.Frame(status_row,style='Card.TFrame');status_text.pack(side='left',fill='x',expand=True)
+        ttk.Label(status_text,text='实时状态',style='Eyebrow.TLabel').pack(anchor='w')
+        self.result=tk.StringVar(value='等待操作')
+        ttk.Label(status_text,textvariable=self.result,style='Card.TLabel',wraplength=580).pack(anchor='w',pady=(2,0))
+        self.details=ttk.Button(status_row,text='详细日志',command=self.toggle_details)
+        self.details.pack(side='right',padx=(10,0))
+        self.progress=ttk.Progressbar(status,mode='determinate',style='Live.Horizontal.TProgressbar')
+        self.progress.pack(fill='x',pady=(8,0))
+        self.log_panel=ttk.Frame(status,style='Card.TFrame')
+        self.log=tk.Text(self.log_panel,height=7,wrap='word',font=('Microsoft YaHei UI',9),
+                         bg=PAPER,fg=INK,relief='flat',padx=10,pady=8,state='disabled')
+        scrollbar=ttk.Scrollbar(self.log_panel,orient='vertical',command=self.log.yview)
+        self.log.configure(yscrollcommand=scrollbar.set)
+        self.log.pack(side='left',fill='both',expand=True)
+        scrollbar.pack(side='right',fill='y')
+
+        audio=self.card(frame)
+        self.section(audio,'01','自定义快门音')
+        row=ttk.Frame(audio,style='Card.TFrame');row.pack(fill='x',pady=(10,7))
         self.source=tk.StringVar(value='尚未选择音频')
         ttk.Entry(row,textvariable=self.source,state='readonly').pack(side='left',fill='x',expand=True,padx=(0,8))
         self.button(row,'选择文件',self.choose).pack(side='left')
-        ttk.Label(frame,text='MP3 / M4A / WAV / FLAC · 最长 0.620 秒',foreground='#59687b').pack(anchor='w',pady=(0,10))
-        row=ttk.Frame(frame);row.pack(fill='x')
-        ttk.Label(row,text='音量').pack(side='left');self.gain=tk.IntVar(value=100)
+        ttk.Label(audio,text='MP3 / M4A / WAV / FLAC  ·  最长 0.620 秒',style='Muted.Card.TLabel').pack(anchor='w',pady=(0,8))
+        row=ttk.Frame(audio,style='Card.TFrame');row.pack(fill='x')
+        ttk.Label(row,text='音量',style='Card.TLabel').pack(side='left');self.gain=tk.IntVar(value=100)
         self.volume=ttk.Spinbox(row,from_=10,to=100,increment=5,textvariable=self.gain,width=5);self.volume.pack(side='left',padx=8)
-        ttk.Label(row,text='%').pack(side='left')
+        ttk.Label(row,text='%',style='Card.TLabel').pack(side='left')
         self.button(row,'生成并检查',self.prepare,'Accent.TButton').pack(side='left',padx=(18,8))
         self.preview_button=self.button(row,'试听处理后声音',self.preview);self.preview_button.pack(side='left');self.preview_button.configure(state='disabled')
         self.info=tk.StringVar(value='先选择文件，再生成可试听的相机音频。')
-        ttk.Label(frame,textvariable=self.info,foreground='#245ad7',wraplength=740).pack(anchor='w',pady=(10,16))
-        ttk.Separator(frame).pack(fill='x',pady=(0,16))
-        ttk.Label(frame,text='2   写入相机',font=('Microsoft YaHei UI',12,'bold')).pack(anchor='w')
-        ttk.Label(frame,text='连接相机后，选择 USB 海量存储器。',wraplength=740).pack(anchor='w',pady=(8,4))
-        self.power=tk.BooleanVar();ttk.Checkbutton(frame,text='我已确认相机电量超过 50%',variable=self.power).pack(anchor='w')
-        row=ttk.Frame(frame);row.pack(fill='x',pady=10)
+        ttk.Label(audio,textvariable=self.info,style='Eyebrow.TLabel',wraplength=700).pack(anchor='w',pady=(8,0))
+
+        camera=self.card(frame)
+        self.section(camera,'02','写入相机')
+        ttk.Label(camera,text='连接相机后，选择 USB 海量存储器。',style='Muted.Card.TLabel').pack(anchor='w',pady=(7,5))
+        self.power=tk.BooleanVar();ttk.Checkbutton(camera,text='我已确认相机电量超过 50%',variable=self.power).pack(anchor='w')
+        row=ttk.Frame(camera,style='Card.TFrame');row.pack(fill='x',pady=(9,0))
         self.button(row,'检测 USB 连接',lambda:self.start(['detect'])).pack(side='left',padx=(0,8))
         self.write_button=self.button(row,'备份并写入',self.install,'Accent.TButton');self.write_button.pack(side='left',padx=(0,8));self.write_button.configure(state='disabled')
         self.button(row,'恢复上一版声音',self.restore).pack(side='left',padx=(0,8))
         self.button(row,'恢复原厂声音',self.factory).pack(side='left')
-        self.progress=ttk.Progressbar(frame,mode='indeterminate');self.progress.pack(fill='x')
-        self.log=tk.Text(frame,height=7,wrap='word',font=('Microsoft YaHei UI',9),bg='white',relief='flat',state='disabled')
-        self.result=tk.StringVar()
-        status=ttk.Frame(frame);status.pack(fill='x',pady=(8,0))
-        ttk.Label(status,textvariable=self.result,wraplength=570).pack(side='left',fill='x',expand=True)
-        self.details=ttk.Button(status,text='详细日志',command=self.toggle_details)
-        self.details.pack(side='right')
         self.error=None
         self.gain.trace_add('write',self.changed_gain)
         root.after(100,self.poll);root.protocol('WM_DELETE_WINDOW',self.close)
+
+    def configure_styles(self):
+        style=ttk.Style(self.root)
+        style.theme_use('clam')
+        style.configure('.',font=('Microsoft YaHei UI',10),foreground=INK)
+        style.configure('TFrame',background=PAPER)
+        style.configure('TLabel',background=PAPER)
+        style.configure('Header.TFrame',background=HEADER)
+        style.configure('Header.TLabel',background=HEADER,foreground='#ffd2dd')
+        style.configure('Title.TLabel',font=('Microsoft YaHei UI',20,'bold'),background=HEADER,foreground=SURFACE)
+        style.configure('Card.TFrame',background=SURFACE,relief='flat',borderwidth=0)
+        style.configure('Panel.TFrame',background=SURFACE,bordercolor=BORDER,relief='solid')
+        style.configure('Card.TLabel',background=SURFACE)
+        style.configure('Muted.Card.TLabel',foreground=MUTED)
+        style.configure('Section.Card.TLabel',font=('Microsoft YaHei UI',13,'bold'))
+        style.configure('Eyebrow.TLabel',background=SURFACE,foreground=ACCENT)
+        style.configure('Badge.TLabel',background=BLUSH,foreground=ACCENT,padding=(7,3),font=('Microsoft YaHei UI',9,'bold'))
+        style.configure('TCheckbutton',background=SURFACE)
+        style.map('TCheckbutton',background=[('active',SURFACE)])
+        style.configure('TButton',padding=(13,7),background=BLUSH,bordercolor=BORDER,foreground=HEADER)
+        style.map('TButton',background=[('disabled','#f0e9eb'),('pressed','#edc7d3'),('active','#f8dce5')],
+                  foreground=[('disabled','#836b75')])
+        style.configure('Accent.TButton',background=ACCENT,foreground=SURFACE,bordercolor=ACCENT)
+        style.map('Accent.TButton',background=[('disabled','#f0e9eb'),('pressed','#711633'),('active','#ad2d54')],
+                  foreground=[('disabled','#836b75'),('!disabled',SURFACE)])
+        style.configure('TEntry',padding=6,fieldbackground=PAPER,bordercolor=BORDER)
+        style.map('TEntry',fieldbackground=[('readonly',PAPER)])
+        style.configure('TSpinbox',padding=4,fieldbackground=PAPER,bordercolor=BORDER)
+        style.configure('TCombobox',padding=4,fieldbackground=PAPER,bordercolor=BORDER)
+        style.configure('Live.Horizontal.TProgressbar',background=ACCENT,troughcolor=BLUSH,
+                        bordercolor=BLUSH,lightcolor=ACCENT,darkcolor=ACCENT,thickness=6)
+
+    def card(self,parent):
+        frame=ttk.Frame(parent,style='Panel.TFrame',padding=(16,12),borderwidth=1)
+        frame.pack(fill='x',pady=(10,0))
+        return frame
+
+    def section(self,parent,number,title):
+        row=ttk.Frame(parent,style='Card.TFrame')
+        row.pack(fill='x')
+        ttk.Label(row,text=number,style='Badge.TLabel').pack(side='left',padx=(0,9))
+        ttk.Label(row,text=title,style='Section.Card.TLabel').pack(side='left')
+
     def button(self,parent,text,fn,style='TButton'):
         b=ttk.Button(parent,text=text,command=fn,style=style);self.buttons.append(b);return b
     def toggle_details(self):
-        if self.log.winfo_manager():
-            self.log.pack_forget()
+        if self.log_panel.winfo_manager():
+            self.log_panel.pack_forget()
             self.details.configure(text='详细日志')
-            self.root.geometry('820x620')
+            self.root.geometry(f'{self.root.winfo_width()}x{self.log_closed_height}')
         else:
-            self.log.pack(fill='both',expand=True,pady=(8,0))
+            self.log_closed_height=self.root.winfo_height()
+            self.log_panel.pack(fill='x',pady=(8,0))
             self.details.configure(text='收起日志')
-            self.root.geometry('820x750')
+            height=min(self.log_closed_height+155,self.root.winfo_screenheight()-90)
+            self.root.geometry(f'{self.root.winfo_width()}x{max(height,self.log_closed_height)}')
             self.log.see('end')
     def append(self,text):
         self.log.configure(state='normal');self.log.insert('end',text+'\n');self.log.see('end');self.log.configure(state='disabled')
@@ -103,17 +176,22 @@ class App:
         dialog.title('FL2／FL3 外观')
         dialog.transient(self.root)
         dialog.resizable(False,False)
-        frame=ttk.Frame(dialog,padding=22)
-        frame.pack(fill='both',expand=True)
-        ttk.Label(frame,text='从匹配的 ZV-E10M2 1.02 备份生成外观文件',font=('Microsoft YaHei UI',12,'bold')).pack(anchor='w')
-        ttk.Label(frame,text='在电脑上离线生成。选择包含三份原始文件的目录。').pack(anchor='w',pady=(6,12))
-        ttk.Label(frame,text='cpapp-b.bin · unit-02a40001.bin · unit-02a4000d.bin').pack(anchor='w')
+        shell=ttk.Frame(dialog,padding=16)
+        shell.pack(fill='both',expand=True)
+        heading=ttk.Frame(shell,style='Header.TFrame',padding=(16,11))
+        heading.pack(fill='x')
+        ttk.Label(heading,text='FL2／FL3 创意外观',style='Title.TLabel').pack(anchor='w')
+        ttk.Label(heading,text='ZV-E10M2  ·  固件 1.02',style='Header.TLabel').pack(anchor='w')
+        frame=self.card(shell)
+        self.section(frame,'01','离线生成')
+        ttk.Label(frame,text='选择包含三份原始文件的备份目录。',style='Muted.Card.TLabel').pack(anchor='w',pady=(6,3))
+        ttk.Label(frame,text='cpapp-b.bin · unit-02a40001.bin · unit-02a4000d.bin',style='Muted.Card.TLabel').pack(anchor='w')
         originals=ROOT/'filter_originals'
         source=tk.StringVar(master=dialog,value=str(originals) if originals.is_dir() else '')
         parent=tk.StringVar(master=dialog)
         for label,value in (('原始备份目录',source),('输出位置',parent)):
-            ttk.Label(frame,text=label).pack(anchor='w',pady=(12,3))
-            row=ttk.Frame(frame)
+            ttk.Label(frame,text=label,style='Card.TLabel').pack(anchor='w',pady=(8,3))
+            row=ttk.Frame(frame,style='Card.TFrame')
             row.pack(fill='x')
             ttk.Entry(row,textvariable=value,width=58,state='readonly').pack(side='left',fill='x',expand=True)
             def choose_directory(variable=value,title=label):
@@ -123,9 +201,10 @@ class App:
             ttk.Button(row,text='选择目录',command=choose_directory).pack(side='left',padx=(8,0))
 
         choice=tk.StringVar(master=dialog,value='FL2 + FL3')
-        ttk.Label(frame,text='生成外观').pack(anchor='w',pady=(12,3))
-        ttk.Combobox(frame,textvariable=choice,values=('FL2 + FL3','FL2','FL3'),state='readonly',width=14).pack(anchor='w')
-        ttk.Label(frame,text='将在输出位置新建外观目录。').pack(anchor='w',pady=(6,10))
+        actions=ttk.Frame(frame,style='Card.TFrame')
+        actions.pack(fill='x',pady=(10,0))
+        ttk.Label(actions,text='生成外观',style='Card.TLabel').pack(side='left')
+        ttk.Combobox(actions,textvariable=choice,values=('FL2 + FL3','FL2','FL3'),state='readonly',width=11).pack(side='left',padx=8)
 
         def generate():
             if not source.get() or not parent.get():
@@ -140,9 +219,10 @@ class App:
             dialog.destroy()
             self.start(['filters',str(input_path),str(output),*looks])
 
-        actions=ttk.Frame(frame)
-        actions.pack(fill='x')
-        ttk.Button(actions,text='生成外观文件',command=generate).pack(side='left')
+        ttk.Button(actions,text='生成外观文件',command=generate,style='Accent.TButton').pack(side='right')
+        camera=self.card(shell)
+        self.section(camera,'02','相机操作')
+        ttk.Label(camera,text='导入两套成像数据，或单独检查和更新左侧图标。',style='Muted.Card.TLabel').pack(anchor='w',pady=(6,8))
 
         def import_camera():
             if not self.power.get():
@@ -155,12 +235,9 @@ class App:
                 dialog.destroy()
                 self.start(['install-filters','--power-confirmed'])
 
-        ttk.Button(actions,text='导入两套到相机',command=import_camera,style='Accent.TButton').pack(side='right')
-        ttk.Separator(frame).pack(fill='x',pady=12)
-        ttk.Label(frame,text='相机左侧图标',font=('Microsoft YaHei UI',11,'bold')).pack(anchor='w')
-        ttk.Label(frame,text='检查两套显示资源，再按需更新原 IN／SH 图标。').pack(anchor='w',pady=(4,8))
-        icon_actions=ttk.Frame(frame)
+        icon_actions=ttk.Frame(camera,style='Card.TFrame')
         icon_actions.pack(fill='x')
+        ttk.Button(icon_actions,text='导入两套到相机',command=import_camera).pack(side='left',padx=(0,8))
 
         def check_icons():
             dialog.destroy()
@@ -171,14 +248,20 @@ class App:
                 dialog.destroy()
                 self.start(['install-icons','--power-confirmed'])
 
-        ttk.Button(icon_actions,text='检查相机图标',command=check_icons).pack(side='left')
+        ttk.Button(icon_actions,text='检查相机图标',command=check_icons).pack(side='left',padx=(0,8))
         ttk.Button(icon_actions,text='更新相机图标',command=update_icons,style='Accent.TButton').pack(side='right')
+        dialog.update_idletasks()
+        x=self.root.winfo_rootx()+(self.root.winfo_width()-dialog.winfo_reqwidth())//2
+        y=self.root.winfo_rooty()+(self.root.winfo_height()-dialog.winfo_reqheight())//2
+        dialog.geometry(f'+{max(x,0)}+{max(y,0)}')
         dialog.grab_set()
         dialog.focus_set()
 
     def start(self,args):
         if self.busy:return
-        self.busy=True;self.error=None;self.result.set('正在处理…');self.refresh();self.progress.start(12)
+        self.busy=True;self.error=None;self.result.set('正在处理…');self.refresh()
+        self.progress.configure(mode='indeterminate')
+        self.progress.start(12)
         def job():
             try:
                 if args[0]=='filters':
@@ -214,7 +297,7 @@ class App:
                     elif value.startswith('写入并回读成功'):
                         self.result.set('写入成功。拔线关机，等指示灯熄灭后取电池一分钟，再开机试听。')
             else:
-                self.busy=False;self.progress.stop();self.refresh()
+                self.busy=False;self.progress.stop();self.progress.configure(mode='determinate',value=0);self.refresh()
                 if value:
                     self.result.set(self.error or '操作未完成，请查看详细日志。')
                 elif self.result.get()=='正在处理…':

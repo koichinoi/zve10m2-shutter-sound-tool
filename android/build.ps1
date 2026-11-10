@@ -9,10 +9,11 @@ param(
     [string] $CameraLut,
     [string] $AlternateCameraLut,
     [string] $LutTemplates,
+    [string] $BuiltInLuts,
     [string] $CameraIcons,
     [string] $ExtraCameraIcons,
     [string] $Display32CameraIcons,
-    [string] $Output = (Join-Path $PSScriptRoot 'build/ZVE10-II-Android-0.2.8.apk')
+    [string] $Output = (Join-Path $PSScriptRoot 'build/ZVE10-II-Android-0.2.9.apk')
 )
 
 $ErrorActionPreference = 'Stop'
@@ -100,6 +101,21 @@ try {
             $file = (Resolve-Path -LiteralPath (Join-Path $LutTemplates $name)).Path
             [IO.Compression.ZipFileExtensions]::CreateEntryFromFile($apk, $file, "assets/lut-templates/$name") | Out-Null
         }
+    }
+    if ($BuiltInLuts) {
+        if (!$LutTemplates) { throw 'Built-in LUT selection requires the custom LUT templates' }
+        $lutFiles = @(Get-ChildItem -LiteralPath $BuiltInLuts -Filter '*.cube' -File -Recurse | Sort-Object Name, FullName)
+        if (!$lutFiles.Count) { throw 'No .cube files found in the LUT library' }
+        $catalog = for ($i = 0; $i -lt $lutFiles.Count; $i++) {
+            $lut = $lutFiles[$i]
+            if ($lut.Length -gt 24MB) { throw "LUT exceeds 24 MB: $($lut.Name)" }
+            $filename = ('{0:D3}.cube' -f ($i + 1))
+            [IO.Compression.ZipFileExtensions]::CreateEntryFromFile($apk, $lut.FullName, "assets/builtin-luts/$filename") | Out-Null
+            @{ name = $lut.BaseName; file = $filename }
+        }
+        $catalogEntry = $apk.CreateEntry('assets/builtin-luts/catalog.json')
+        $writer = [IO.StreamWriter]::new($catalogEntry.Open(), [Text.UTF8Encoding]::new($false))
+        try { $writer.Write((ConvertTo-Json -InputObject @($catalog) -Compress)) } finally { $writer.Dispose() }
     }
     if ($CameraIcons) {
         $names = @('manifest.json') + @(1..4 | ForEach-Object { "install$_.so"; "restore$_.so" })

@@ -1,8 +1,8 @@
 # ZV-E10 II 安卓工具
 
-公开 APK 为 0.2.5，本地测试源码为 0.2.8。最低要求 Android 8.0，快门音和图标写入需 Android 9 或更高版本。
+公开 APK 和本地测试源码均为 0.2.9。最低要求 Android 8.0，快门音和图标写入需 Android 9 或更高版本。
 
-[下载公开测试 APK](downloads/ZVE10-II-Android-0.2.5-public.apk)。公开包支持离线音频处理、外观文件生成和 USB 检测。服务模式、相机备份、快门音写入、外观导入和图标更新需要带本地资源的构建。
+[下载公开测试 APK](downloads/ZVE10-II-Android-0.2.9-public.apk)。公开包支持离线音频处理、外观文件生成和 USB 检测。服务模式、相机备份、快门音写入、LUT 选择与相机导入、图标更新需要带本地资源的构建。
 
 - 快门音。选取音频、调节音量、生成 24 kHz 单声道 WAV、试听并导出。限制为 0.620 秒，超长文件需要先剪短。生成的 WAV 可在电脑版选取后写入相机。
 - FL2／FL3。分别选择三份匹配的原始备份，选择 FL2、FL3 或两套，校验原始文件和生成结果的 SHA-256 后导出 ZIP。备份文件名和适用基线见 [外观数据说明](../filters/README.md)。
@@ -58,6 +58,8 @@ python android/prepare_looks.py . android/build/my-lut --from-operation operatio
 
 本地打包时运行 `prepare_lut_templates.py`，依次传入电脑版目录、准备好的 `-CameraLut` 目录和新的模板输出目录。构建 APK 时用 `-LutTemplates` 指定该输出。模板只允许填入已验证的 12 个相机曲线窗口对应的数据。
 
+0.2.9 可在本地构建时用 `-BuiltInLuts 'android/luts'` 加入仓库的 14 款 LUT。应用将这些文件列在 IN 和 SH 的 LUT 选择菜单中，两槽可以自由搭配。选择菜单也提供「从手机选择 .cube 文件」。[查看 14 款 LUT](luts)
+
 ## 下载本机构建模板
 
 [下载安卓 0.2.8 模板 ZIP](downloads/ZVE10-II-Android-0.2.8-templates.zip)。模板带有 ZV-E10M2 固件 1.02 的兼容状态校验，实际写入前还会核对相机文件。若起始状态不同，需要用相机的对应备份重新生成模板。
@@ -72,7 +74,7 @@ $templates = 'android/build/templates'
   -CameraLooks "$templates/camera-looks" -CameraLut "$templates/camera-lut" `
   -AlternateCameraLut "$templates/camera-lut-alt" -LutTemplates "$templates/lut-templates" `
   -CameraIcons "$templates/camera-icons" -ExtraCameraIcons "$templates/extra" `
-  -Display32CameraIcons "$templates/display32"
+  -Display32CameraIcons "$templates/display32" -BuiltInLuts 'android/luts'
 ```
 
 ## 更新相机左侧图标

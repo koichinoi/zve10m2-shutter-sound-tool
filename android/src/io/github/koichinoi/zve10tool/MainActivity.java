@@ -18,7 +18,10 @@ import android.os.Bundle;
 import android.view.View;
 import android.widget.*;
 import java.io.*;
+import java.nio.charset.StandardCharsets;
 import java.util.Locale;
+import org.json.JSONArray;
+import org.json.JSONObject;
 
 public final class MainActivity extends Activity {
     private static final int PAPER = 0xfffff7f6, INK = 0xff302028, MUTED = 0xff715663;
@@ -157,7 +160,7 @@ public final class MainActivity extends Activity {
         identity.addView(nameplate, new LinearLayout.LayoutParams(0, -2, 1));
         TextView title = label(nameplate, "ZV-E10 II 相机工具", 19, true);
         title.setTextColor(Color.WHITE);
-        label(nameplate, "固件 1.02  ·  安卓 0.2.8", 12, false).setTextColor(0xffffcddd);
+        label(nameplate, "固件 1.02  ·  安卓 0.2.9", 12, false).setTextColor(0xffffcddd);
         Button history = new Button(this, null, android.R.attr.borderlessButtonStyle);
         history.setText("日志");
         history.setMinWidth(0);
@@ -287,7 +290,7 @@ public final class MainActivity extends Activity {
                 for (int i = 0; i < cubeButtons.length; i++) {
                     int slot = i;
                     cubeButtons[i] = button(page, i == 0 ? "为 IN 选择 .cube" : "为 SH 选择 .cube",
-                            view -> pick("*/*", PICK_CUBE + slot));
+                            view -> chooseCube(slot));
                 }
                 label(page, "支持每轴 2–65 点的纯 3D .cube。两槽都选好后可直接导入。", 13, false);
             }
@@ -675,6 +678,65 @@ public final class MainActivity extends Activity {
         startActivityForResult(intent, request);
     }
 
+    private void chooseCube(int slot) {
+        JSONArray catalog;
+        try {
+            byte[] bytes = MobileSound.asset(this, "builtin-luts/", "catalog.json", 65536);
+            catalog = new JSONArray(new String(bytes, StandardCharsets.UTF_8));
+        } catch (FileNotFoundException absent) {
+            pick("*/*", PICK_CUBE + slot);
+            return;
+        } catch (Exception invalid) {
+            setStatus(Area.LOOKS, "内置 LUT 列表无法读取，已打开手机文件选择。");
+            pick("*/*", PICK_CUBE + slot);
+            return;
+        }
+        String[] names = new String[catalog.length() + 1];
+        names[0] = "从手机选择 .cube 文件";
+        for (int i = 0; i < catalog.length(); i++) names[i + 1] = catalog.optJSONObject(i).optString("name");
+        new AlertDialog.Builder(this).setTitle(slot == 0 ? "为 IN 选择 LUT" : "为 SH 选择 LUT")
+                .setItems(names, (dialog, index) -> {
+                    if (index == 0) {
+                        pick("*/*", PICK_CUBE + slot);
+                        return;
+                    }
+                    JSONObject entry = catalog.optJSONObject(index - 1);
+                    String file = entry.optString("file");
+                    if (file.matches("[0-9]+\\.cube")) loadCube(slot, null, file, names[index]);
+                }).setNegativeButton("取消", null).show();
+    }
+
+    private void loadCube(int slot, Uri uri, String assetFile, String name) {
+        String label = slot == 0 ? "IN" : "SH";
+        selectedCubes[slot] = null;
+        cubeNames[slot] = null;
+        cubeButtons[slot].setText("为 " + label + " 选择 .cube");
+        runTask(Area.LOOKS, () -> {
+            String filename = name;
+            if (uri != null) {
+                try (android.database.Cursor cursor = getContentResolver().query(uri,
+                        new String[]{android.provider.OpenableColumns.DISPLAY_NAME}, null, null, null)) {
+                    if (cursor != null && cursor.moveToFirst() && cursor.getString(0) != null)
+                        filename = cursor.getString(0);
+                }
+            }
+            MobileCube cube;
+            try (InputStream input = uri == null ? getAssets().open("builtin-luts/" + assetFile)
+                    : getContentResolver().openInputStream(uri)) {
+                if (input == null) throw new IOException("无法打开 LUT 文件");
+                cube = MobileCube.read(input);
+            }
+            String displayName = filename;
+            return () -> {
+                selectedCubes[slot] = cube;
+                cubeNames[slot] = displayName;
+                cubeButtons[slot].setText(label + " · " + displayName);
+                lutSelector.setSelection(customLutIndex);
+                setStatus(Area.LOOKS, label + " 的 LUT 已校验。");
+            };
+        });
+    }
+
     @Override protected void onActivityResult(int request, int result, Intent data) {
         super.onActivityResult(request, result, data);
         if (result != RESULT_OK || data == null || data.getData() == null) return;
@@ -686,32 +748,7 @@ public final class MainActivity extends Activity {
             setStatus(Area.AUDIO, "已选择音频，可以生成。");
         } else if (request >= PICK_CUBE && request < PICK_CUBE + selectedCubes.length
                 && cubeButtons[request - PICK_CUBE] != null) {
-            int slot = request - PICK_CUBE;
-            String label = slot == 0 ? "IN" : "SH";
-            selectedCubes[slot] = null;
-            cubeNames[slot] = null;
-            cubeButtons[slot].setText("为 " + label + " 选择 .cube");
-            runTask(Area.LOOKS, () -> {
-                String name = label + ".cube";
-                try (android.database.Cursor cursor = getContentResolver().query(uri,
-                        new String[]{android.provider.OpenableColumns.DISPLAY_NAME}, null, null, null)) {
-                    if (cursor != null && cursor.moveToFirst() && cursor.getString(0) != null)
-                        name = cursor.getString(0);
-                }
-                MobileCube cube;
-                try (InputStream input = getContentResolver().openInputStream(uri)) {
-                    if (input == null) throw new IOException("无法打开 LUT 文件");
-                    cube = MobileCube.read(input);
-                }
-                String filename = name;
-                return () -> {
-                    selectedCubes[slot] = cube;
-                    cubeNames[slot] = filename;
-                    cubeButtons[slot].setText(label + " · " + filename);
-                    lutSelector.setSelection(customLutIndex);
-                    setStatus(Area.LOOKS, label + " 的 LUT 已校验。");
-                };
-            });
+            loadCube(request - PICK_CUBE, uri, null, request == PICK_CUBE ? "IN.cube" : "SH.cube");
         } else if (request >= PICK_BACKUP && request < PICK_BACKUP + originals.length) {
             int index = request - PICK_BACKUP;
             originals[index] = uri;

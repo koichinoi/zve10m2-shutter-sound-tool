@@ -8,7 +8,7 @@
 
 ## 安卓测试版
 
-[下载 0.2.10 公开 APK](android/downloads/ZVE10-II-Android-0.2.10-public.apk) · [安卓使用说明和源码](android/README.md)
+[下载 0.2.11 公开 APK](android/downloads/ZVE10-II-Android-0.2.11-public.apk) · [安卓使用说明和源码](android/README.md)
 
 公开版可处理快门音、生成 FL2／FL3 外观文件、检测 USB，以及在「创意外观」浏览和导出 14 款 LUT。通过服务模式备份、写入快门音、导入外观及更新相机图标需要带本地资源的构建。
 

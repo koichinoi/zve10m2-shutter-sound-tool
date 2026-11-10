@@ -59,6 +59,7 @@ public final class MainActivity extends Activity {
     private static final java.time.format.DateTimeFormatter LOG_TIME =
             java.time.format.DateTimeFormatter.ofPattern("HH:mm:ss", Locale.ROOT);
     private AlertDialog logDialog;
+    private AlertDialog lutLibraryDialog;
     private LinearLayout logRows;
     private ScrollView logScroll;
     private TextView logCount;
@@ -164,7 +165,7 @@ public final class MainActivity extends Activity {
         identity.addView(nameplate, new LinearLayout.LayoutParams(0, -2, 1));
         TextView title = label(nameplate, "ZV-E10 II 相机工具", 19, true);
         title.setTextColor(Color.WHITE);
-        label(nameplate, "固件 1.02  ·  安卓 0.2.10", 12, false).setTextColor(0xffffcddd);
+        label(nameplate, "固件 1.02  ·  安卓 0.2.11", 12, false).setTextColor(0xffffcddd);
         Button history = new Button(this, null, android.R.attr.borderlessButtonStyle);
         history.setText("日志");
         history.setMinWidth(0);
@@ -702,14 +703,96 @@ public final class MainActivity extends Activity {
     }
 
     private void showCubeLibrary() {
-        if (working || checkingUsb) return;
-        String[] names = new String[builtinLuts.length()];
-        for (int i = 0; i < names.length; i++) names[i] = builtinLuts.optJSONObject(i).optString("name");
-        new AlertDialog.Builder(this).setTitle("内置 LUT · 点选即可导出")
-                .setItems(names, (dialog, index) -> {
-                    pendingCubeExport = builtinLuts.optJSONObject(index).optString("file");
-                    export("application/octet-stream", names[index] + ".cube", EXPORT_CUBE);
-                }).setNegativeButton("取消", null).show();
+        if (working || checkingUsb || lutLibraryDialog != null) return;
+        LinearLayout panel = new LinearLayout(this);
+        panel.setOrientation(LinearLayout.VERTICAL);
+        panel.setBackground(rounded(PAPER, 24));
+        panel.setClipToOutline(true);
+
+        LinearLayout header = new LinearLayout(this);
+        header.setOrientation(LinearLayout.VERTICAL);
+        header.setPadding(dp(20), dp(18), dp(20), dp(16));
+        header.setBackgroundColor(DARK);
+        panel.addView(header, new LinearLayout.LayoutParams(-1, -2));
+        LinearLayout titleRow = actionRow(header);
+        titleRow.setGravity(android.view.Gravity.CENTER_VERTICAL);
+        TextView title = label(titleRow, "内置 LUT", 24, true);
+        title.setLayoutParams(new LinearLayout.LayoutParams(0, -2, 1));
+        title.setTextColor(Color.WHITE);
+        TextView count = label(titleRow, builtinLuts.length() + " 款", 12, true);
+        count.setTextColor(DARK);
+        count.setPadding(dp(10), dp(4), dp(10), dp(4));
+        count.setBackground(rounded(BLUSH, 10));
+        TextView hint = label(header, "选一款导出原始 .cube 文件", 13, false);
+        hint.setTextColor(0xffffcddd);
+        hint.setPadding(0, dp(5), 0, 0);
+
+        ScrollView scroll = new ScrollView(this);
+        scroll.setFillViewport(true);
+        panel.addView(scroll, new LinearLayout.LayoutParams(-1, 0, 1));
+        LinearLayout rows = new LinearLayout(this);
+        rows.setOrientation(LinearLayout.VERTICAL);
+        rows.setPadding(dp(14), dp(12), dp(14), dp(4));
+        scroll.addView(rows, new ScrollView.LayoutParams(-1, -2));
+        for (int i = 0; i < builtinLuts.length(); i++) {
+            JSONObject entry = builtinLuts.optJSONObject(i);
+            addCubeLibraryRow(rows, entry.optString("name"), entry.optString("file"), i + 1);
+        }
+
+        LinearLayout footer = new LinearLayout(this);
+        footer.setOrientation(LinearLayout.VERTICAL);
+        footer.setPadding(dp(14), 0, dp(14), dp(12));
+        panel.addView(footer, new LinearLayout.LayoutParams(-1, -2));
+        action(footer, "关闭", false, false, view -> lutLibraryDialog.dismiss());
+
+        lutLibraryDialog = new AlertDialog.Builder(this).setView(panel).create();
+        lutLibraryDialog.setOnDismissListener(dialog -> lutLibraryDialog = null);
+        lutLibraryDialog.show();
+        android.view.Window window = lutLibraryDialog.getWindow();
+        if (window != null) {
+            android.util.DisplayMetrics display = getResources().getDisplayMetrics();
+            window.setBackgroundDrawableResource(android.R.color.transparent);
+            window.setLayout(Math.min(dp(480), display.widthPixels - dp(28)),
+                    Math.min(dp(650), display.heightPixels - dp(64)));
+        }
+    }
+
+    private void addCubeLibraryRow(LinearLayout rows, String filename, String asset, int index) {
+        String[] parts = filename.replaceFirst("^\\d+_", "").split("_", 2);
+        LinearLayout row = new LinearLayout(this);
+        row.setGravity(android.view.Gravity.CENTER_VERTICAL);
+        row.setMinimumHeight(dp(66));
+        row.setPadding(dp(12), dp(9), dp(12), dp(9));
+        android.graphics.drawable.GradientDrawable surface = rounded(Color.WHITE, 14);
+        surface.setStroke(dp(1), 0xffeedce2);
+        row.setBackground(new android.graphics.drawable.RippleDrawable(
+                ColorStateList.valueOf(0x229a2146), surface, null));
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(-1, -2);
+        params.bottomMargin = dp(8);
+        rows.addView(row, params);
+
+        TextView number = label(row, String.format(Locale.ROOT, "%02d", index), 13, true);
+        number.setLayoutParams(new LinearLayout.LayoutParams(dp(34), dp(34)));
+        number.setGravity(android.view.Gravity.CENTER);
+        number.setTextColor(BERRY);
+        number.setBackground(rounded(BLUSH, 10));
+        LinearLayout details = new LinearLayout(this);
+        details.setOrientation(LinearLayout.VERTICAL);
+        LinearLayout.LayoutParams detailParams = new LinearLayout.LayoutParams(0, -2, 1);
+        detailParams.setMarginStart(dp(10));
+        detailParams.setMarginEnd(dp(8));
+        row.addView(details, detailParams);
+        label(details, parts[0], 16, true);
+        if (parts.length > 1) label(details, parts[1].replace('_', ' '), 12, false);
+        TextView exportLabel = label(row, "导出", 13, true);
+        exportLabel.setTextColor(BERRY);
+        row.setContentDescription("导出 " + String.join(" ", parts));
+        row.setFocusable(true);
+        row.setOnClickListener(view -> {
+            lutLibraryDialog.dismiss();
+            pendingCubeExport = asset;
+            export("application/octet-stream", filename + ".cube", EXPORT_CUBE);
+        });
     }
 
     private void chooseCube(int slot) {
@@ -866,6 +949,7 @@ public final class MainActivity extends Activity {
 
     @Override protected void onDestroy() {
         if (logDialog != null) logDialog.dismiss();
+        if (lutLibraryDialog != null) lutLibraryDialog.dismiss();
         unregisterReceiver(usbPermission);
         stopPreview();
         super.onDestroy();

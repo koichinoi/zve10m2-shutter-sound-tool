@@ -13,7 +13,7 @@ param(
     [string] $CameraIcons,
     [string] $ExtraCameraIcons,
     [string] $Display32CameraIcons,
-    [string] $Output = (Join-Path $PSScriptRoot 'build/ZVE10-II-Android-0.2.10.apk')
+    [string] $Output = (Join-Path $PSScriptRoot 'build/ZVE10-II-Android-0.2.11.apk')
 )
 
 $ErrorActionPreference = 'Stop'

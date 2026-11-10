@@ -329,9 +329,12 @@ def main():
     a=s.add_parser('install');a.add_argument('target');a.add_argument('--power-confirmed',action='store_true')
     a=s.add_parser('restore');a.add_argument('--power-confirmed',action='store_true')
     a=s.add_parser('factory');a.add_argument('--power-confirmed',action='store_true')
-    a=s.add_parser('install-filters');a.add_argument('--power-confirmed',action='store_true')
+    a=s.add_parser('install-filters');a.add_argument('--power-confirmed',action='store_true');a.add_argument('--in-cube',default=None);a.add_argument('--sh-cube',default=None)
     s.add_parser('check-icons')
     a=s.add_parser('install-icons');a.add_argument('--power-confirmed',action='store_true')
+    a.add_argument('--top-in',default='IN');a.add_argument('--top-sh',default='SH')
+    a.add_argument('--bot-in',default='FL2');a.add_argument('--bot-sh',default='FL3')
+    a.add_argument('--title-in',default=None);a.add_argument('--title-sh',default=None)
     a=s.add_parser('detect')
     args=p.parse_args()
     try:
@@ -339,11 +342,20 @@ def main():
         elif args.command=='install':install(args.target,args.power_confirmed)
         elif args.command=='install-filters':
             import filter_install
-            with_camera_lock(lambda:filter_install.install(sys.modules[__name__],args.power_confirmed))
+            with_camera_lock(lambda:filter_install.install(sys.modules[__name__],args.power_confirmed,in_cube_path=args.in_cube,sh_cube_path=args.sh_cube))
         elif args.command in ('check-icons','install-icons'):
             import icon_install
-            with_camera_lock(lambda:icon_install.run(sys.modules[__name__],args.command=='install-icons',
-                                                    getattr(args,'power_confirmed',False)))
+            with_camera_lock(lambda:icon_install.run(
+                sys.modules[__name__],
+                args.command=='install-icons',
+                getattr(args,'power_confirmed',False),
+                top_in=getattr(args,'top_in','IN'),
+                top_sh=getattr(args,'top_sh','SH'),
+                bot_in=getattr(args,'bot_in','FL2'),
+                bot_sh=getattr(args,'bot_sh','FL3'),
+                title_in=getattr(args,'title_in',None),
+                title_sh=getattr(args,'title_sh',None),
+            ))
         elif args.command=='factory':install('factory',args.power_confirmed)
         elif args.command=='restore':
             if not (ROOT/'previous.json').exists():raise ValueError('还没有用本工具替换过声音，因此没有上一版可恢复')

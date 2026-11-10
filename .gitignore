@@ -19,3 +19,8 @@ dist/
 *.wav
 *.mp3
 *.m4a
+
+# Generated at runtime
+filters/luts/
+filters/.icon_cache/
+ZVE10M2-*/

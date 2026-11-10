@@ -1,4 +1,4 @@
-"""Windows service diagnostics and updates for the FL2/FL3 list icons."""
+"""Windows service diagnostics and updates for Creative Look list icons and title labels."""
 from pathlib import Path
 import re
 import struct
@@ -7,12 +7,34 @@ import time
 import uuid
 import zipfile
 
+from filters.icon_builder import (
+    ICON_PRESETS,
+    build_target_string_banks,
+    build_target_uxc_banks,
+    compile_and_simulate_uxc_batches,
+    verify_live_uxc_against_stock,
+)
+
 
 BANK_1 = '/usr/share/app/image_01_23_IPSX.uxc'
 BANK_2 = '/usr/share/app/image_02_23_IPSX.uxc'
 BANK_1_32 = '/usr/share/app/image_01_32_IPSX.uxc'
 BANK_2_32 = '/usr/share/app/image_02_32_IPSX.uxc'
 BANKS = {BANK_1: 9675260, BANK_2: 6838252, BANK_1_32: 9685748, BANK_2_32: 6929728}
+
+STRING_H = '/usr/share/app/string_simplifiedchinese_horizontal.uxc'
+STRING_V = '/usr/share/app/string_simplifiedchinese_vertical.uxc'
+STRING_BANKS = {STRING_H: 484416, STRING_V: 484416}
+
+BANK_PREFIXES = {
+    BANK_1: ('zvicon', 4),
+    BANK_2: ('zviconx2', 1),
+    BANK_1_32: ('zvicon32b1', 4),
+    BANK_2_32: ('zvicon32b2', 1),
+    STRING_H: ('zvtexth', 1),
+    STRING_V: ('zvtextv', 1),
+}
+
 LOADER = '/tmp/jiritsu/libJit.so'
 PROTECTED = {
     '/usr/lib/appFw.so': 93620512,
@@ -90,16 +112,29 @@ def select_plans(plans, hashes):
     return selected
 
 
-def describe(plans, hashes):
+def describe(plans, hashes, research_root=None):
     base, extra1, extra2, *display32 = plans
     states = {
-        BANK_1: {base['before']: '原厂', base['after']: '已写入 0.2.3', extra1['after']: '已更新'},
-        BANK_2: {extra2['before']: '原厂', extra2['after']: '已更新'},
+        BANK_1: {base['before']: '原厂(IN/SH)', base['after']: '已写入 0.2.3', extra1['after']: '已更新(FL2/FL3)'},
+        BANK_2: {extra2['before']: '原厂(IN/SH)', extra2['after']: '已更新(FL2/FL3)'},
     }
     for plan in display32:
-        states[plan['path']] = {plan['before']: '原厂', plan['after']: '已更新'}
+        states[plan['path']] = {plan['before']: '原厂(IN/SH)', plan['after']: '已更新(FL2/FL3)'}
+
+    if research_root is not None:
+        for key, _, top_in, top_sh, bot_in, bot_sh, _, _ in ICON_PRESETS:
+            if key in ('all_fl', 'all_stock'):
+                continue
+            try:
+                preset_banks = build_target_uxc_banks(research_root, top_in, top_sh, bot_in, bot_sh)
+                tag = f'上{top_in}/{top_sh}·下{bot_in}/{bot_sh}' if (top_in, top_sh) != (bot_in, bot_sh) else f'{bot_in}/{bot_sh}'
+                for path, info in preset_banks.items():
+                    states[path].setdefault(info['target_sha256'], tag)
+            except Exception:
+                pass
+
     labels = ('23-1', '23-2', '32-1', '32-2')
-    return '，'.join(f'{label} {states[path].get(hashes[path], "未知版本")}'
+    return '，'.join(f'{label} {states[path].get(hashes[path], "自定义代号")}'
                     for label, path in zip(labels, BANKS))
 
 
@@ -125,12 +160,39 @@ def verify_looks(camera, backend, events):
     ram = settings.parse_snapshot(host.read_snapshot(camera.dev, True, events), 'icons', 2, time.monotonic_ns(), True)
     stored = settings.parse_snapshot(host.read_snapshot(camera.dev, False, events), 'icons', 3, time.monotonic_ns(), False)
     settings.fresh(settings.Observation(ram, stored, direct, 1), 'icons', time.monotonic_ns())
-    if any(direct[key] != targets[key] or stored.properties[1, key].data != targets[key] for key in targets):
-        raise ValueError('请先安装 FL2／FL3 成像数据，再更新图标')
-    return reviewed['components'][0]['candidate_sha256']
+    if all(direct[key] == targets[key] and stored.properties[1, key].data == targets[key] for key in targets):
+        return reviewed['components'][0]['candidate_sha256']
+    u1_ok = (
+        direct[0x02A40001] == stored.properties[1, 0x02A40001].data
+        and direct[0x02A40001][4651] == 0x17
+        and direct[0x02A40001][4655] == 0x17
+        and direct[0x02A40001][4652] == 0x19
+        and direct[0x02A40001][4656] == 0x19
+    )
+    ud_ok = (
+        direct[0x02A4000D] == stored.properties[1, 0x02A4000D].data
+        and direct[0x02A4000D][449] == 0x17
+        and direct[0x02A4000D][453] == 0x17
+        and direct[0x02A4000D][450] == 0x19
+        and direct[0x02A4000D][454] == 0x19
+    )
+    if not (u1_ok and ud_ok):
+        raise ValueError('请先安装 FL2／FL3 或自定义 LUT 成像数据，再更新图标')
+    return None
 
 
-def transact(backend, io, plans, folder, report, pending, writing, check_looks):
+def transact(
+    backend,
+    io,
+    plans,
+    folder,
+    report,
+    pending,
+    writing,
+    check_looks,
+    target_banks=None,
+    target_strings=None,
+):
     def journal(phase, **fields):
         report.update(phase=phase, **fields)
         backend.save(folder / 'report.json', report)
@@ -140,18 +202,50 @@ def transact(backend, io, plans, folder, report, pending, writing, check_looks):
     bank_data = {path: io.read(path, size) for path, size in BANKS.items()}
     if any(len(bank_data[path]) != size for path, size in BANKS.items()):
         raise ValueError('图标资源读取不完整')
+
+    if target_banks is not None:
+        for path, binfo in target_banks.items():
+            verify_live_uxc_against_stock(binfo, bank_data[path])
+
+    string_data = {}
+    if target_strings is not None:
+        for path, sinfo in target_strings.items():
+            raw_s = io.read(path, len(sinfo['stock_bytes']))
+            verify_live_uxc_against_stock(sinfo, raw_s)
+            string_data[path] = raw_s
+
     hashes = {path: backend.sha(data) for path, data in bank_data.items()}
-    status = describe(plans, hashes)
+    status = describe(plans, hashes, getattr(backend, 'RESEARCH', None))
     journal('checked', hashes=hashes, summary=status)
     backend.say('图标资源：' + status)
     if not writing:
         journal('checked', complete=True)
         return
-    selected = select_plans(plans, hashes)
-    if not selected:
-        journal('already_updated', complete=True)
-        backend.say('相机图标资源已更新，无需重复写入。')
-        return
+
+    all_targets = {}
+    all_live = {}
+    if target_banks is not None:
+        all_targets.update(target_banks)
+        all_live.update(bank_data)
+    if target_strings is not None:
+        all_targets.update(target_strings)
+        all_live.update(string_data)
+
+    if all_targets:
+        needs_update = [
+            path for path, info in all_targets.items()
+            if all_live[path] != info['target_bytes']
+        ]
+        if not needs_update:
+            journal('already_updated', complete=True)
+            backend.say('相机图标已是所选名称，无需重复写入。')
+            return
+    else:
+        selected = select_plans(plans, hashes)
+        if not selected:
+            journal('already_updated', complete=True)
+            backend.say('相机图标资源已更新，无需重复写入。')
+            return
 
     cp_hash = check_looks()
     protected = {}
@@ -161,7 +255,6 @@ def transact(backend, io, plans, folder, report, pending, writing, check_looks):
             raise ValueError('相机保护文件读取不完整：' + path)
         protected[path] = backend.sha(data)
         if path == '/usr/lib/appFw.so':
-            # Desktop and Android can each have prepared the active guard.
             matches = set(re.findall(rb'/cp/(?:zvs_[0-9a-f]{16}|zve10m2_project11_full)\.bin\0',
                                      data[backend.OFF:backend.OFF + 0xb00]))
             if len(matches) > 1:
@@ -173,17 +266,44 @@ def transact(backend, io, plans, folder, report, pending, writing, check_looks):
                 if not 0 < len(audio) <= 15360 or len(audio) % 128:
                     raise ValueError('当前快门音文件长度异常')
                 protected[audio_path] = backend.sha(audio)
-    if protected['/cp/cpapp-b.bin'] != cp_hash or protected['/usr/lib/libJiritsu.so'] != backend.PINS['/usr/lib/libJiritsu.so'][1]:
+    if (cp_hash is not None and protected['/cp/cpapp-b.bin'] != cp_hash) or protected['/usr/lib/libJiritsu.so'] != backend.PINS['/usr/lib/libJiritsu.so'][1]:
         raise ValueError('外观程序或相机服务程序不匹配')
     if io.read('/etc/ld.so.preload', 4096, True):
         raise ValueError('检测到其他启动修改')
-    steps = [(plan['path'], step) for plan in selected for step in plan['steps']]
-    helper_paths = [LOADER, *(path for _, step in steps for path in (step['stage'], step['install']['result']))]
-    if any(io.read(path, 65536, True) is not None for path in helper_paths):
+
+    if all_targets:
+        backend.say('正在针对当前相机状态编译图标写入与回退程序，并执行指令级离线仿真…')
+        steps = []
+        work_dir = folder / 'workers'
+        work_dir.mkdir(exist_ok=True)
+        for path in needs_update:
+            info = all_targets[path]
+            prefix, _ = BANK_PREFIXES[path]
+            batch_steps = compile_and_simulate_uxc_batches(
+                backend.RESEARCH,
+                work_dir,
+                path,
+                all_live[path],
+                info['target_bytes'],
+                info['slots'],
+                prefix,
+            )
+            for s in batch_steps:
+                steps.append((path, s))
+    else:
+        steps = [(plan['path'], step) for plan in selected for step in plan['steps']]
+
+    if io.read(LOADER, 65536, True) is not None:
         raise ValueError('存在未清理的辅助文件，请保留现场')
+    for _, step in steps:
+        if io.read(step['stage'], 65536, True) is not None:
+            raise ValueError('存在未清理的辅助文件，请保留现场')
+        stale_res = io.read(step['install']['result'], 65536, True)
+        if stale_res is not None:
+            io.clean(step['install']['result'], stale_res)
 
     backup = folder / 'before.zip'
-    items = {Path(path).name: data for path, data in bank_data.items()}
+    items = {Path(path).name: data for path, data in {**bank_data, **string_data}.items()}
     for index, (_, step) in enumerate(steps, 1):
         items[f'restore{index}.so'] = step['restore']['blob']
     with zipfile.ZipFile(backup, 'x', zipfile.ZIP_DEFLATED, compresslevel=1) as archive:
@@ -195,8 +315,9 @@ def transact(backend, io, plans, folder, report, pending, writing, check_looks):
     journal('backup_verified', backup=str(backup), protected=protected)
     backend.save(pending, {'operation': 'camera-icons', 'report': str(folder / 'report.json')})
 
+    all_sizes = {**BANKS, **{p: len(info['stock_bytes']) for p, info in (target_strings or {}).items()}}
     for index, (path, step) in enumerate(steps, 1):
-        if backend.sha(io.read(path, BANKS[path])) != step['before']:
+        if backend.sha(io.read(path, all_sizes[path])) != step['before']:
             raise ValueError('图标资源在写入前发生变化')
         backend.say(f'正在更新并回读图标 {index}/{len(steps)}…')
         journal('staging', batch=index)
@@ -210,14 +331,18 @@ def transact(backend, io, plans, folder, report, pending, writing, check_looks):
         raw = io.read(result, 136)
         (folder / f'result-{index}.bin').write_bytes(raw)
         verify_result(raw, step['windows'])
-        if backend.sha(io.read(path, BANKS[path])) != step['after']:
+        if backend.sha(io.read(path, all_sizes[path])) != step['after']:
             raise ValueError('图标资源回读失败')
         io.clean(stage, blob)
         io.clean(LOADER, blob)
+        io.clean(result, raw)
 
-    expected = {plan['path']: plan['after'] for plan in plans}
+    if all_targets:
+        expected = {path: info['target_sha256'] for path, info in all_targets.items()}
+    else:
+        expected = {plan['path']: plan['after'] for plan in plans}
     expected.update(protected)
-    sizes = {**BANKS, **PROTECTED}
+    sizes = {**all_sizes, **PROTECTED}
     for path, digest in expected.items():
         if backend.sha(io.read(path, sizes.get(path, 16384))) != digest:
             raise ValueError('写后保护校验失败：' + path)
@@ -226,27 +351,77 @@ def transact(backend, io, plans, folder, report, pending, writing, check_looks):
     backend.say('图标更新和回读通过。请重启相机查看左侧列表。')
 
 
-def run(backend, writing, power=False):
+def run(
+    backend,
+    writing,
+    power=False,
+    top_in='IN',
+    top_sh='SH',
+    bot_in='FL2',
+    bot_sh='FL3',
+    title_in=None,
+    title_sh=None,
+):
     if writing and not power:
         raise ValueError('请先确认电量超过 50%')
     pending = backend.ROOT / 'pending.json'
     if writing and pending.exists():
         raise ValueError('有未完成的相机操作，请保留报告和备份')
-    plans = load_plans(backend, writing)
+    plans = load_plans(backend, False)
+
+    target_banks = None
+    target_strings = None
+    if writing:
+        backend.say(
+            f'正在准备图标资源（上方 1~6 图标：{top_in}/{top_sh} · 下方基础图标：{bot_in}/{bot_sh}）…'
+        )
+        target_banks = build_target_uxc_banks(backend.RESEARCH, top_in, top_sh, bot_in, bot_sh)
+        if title_in and title_sh:
+            target_strings = build_target_string_banks(backend.RESEARCH, title_in, title_sh)
+
     folder = backend.ROOT / 'operations' / ('icons_' + uuid.uuid4().hex[:16])
     folder.mkdir(parents=True)
-    report = {'complete': False, 'events': [], 'read_only': not writing}
-    paths = {'/version.txt', *BANKS, *PROTECTED, '/etc/ld.so.preload', LOADER}
+    report = {
+        'complete': False,
+        'events': [],
+        'read_only': not writing,
+        'icon_labels': {
+            'top_in': top_in,
+            'top_sh': top_sh,
+            'bot_in': bot_in,
+            'bot_sh': bot_sh,
+            'title_in': title_in,
+            'title_sh': title_sh,
+        },
+    }
+    paths = {'/version.txt', *BANKS, *STRING_BANKS, *PROTECTED, '/etc/ld.so.preload', LOADER}
     for plan in plans:
         for step in plan['steps']:
             paths.update((step['stage'], step['install']['result']))
+    for prefix, max_batches in BANK_PREFIXES.values():
+        for idx in range(1, max_batches + 1):
+            for mode in ('install', 'restore'):
+                res = f'/tmp/jiritsu/{prefix}_{idx}_{mode}.result'
+                paths.add(res)
+                paths.add(res.removesuffix('.result') + '.stage.so')
+
     sys.path.insert(0, str(backend.TOOLKIT / 'Sony-PMCA-RE'))
     from pmca.commands.usb import senserShellCommand
 
     def connected(camera):
         io = backend.CameraIO(camera, paths, report['events'])
-        transact(backend, io, plans, folder, report, pending, writing,
-                 lambda: verify_looks(camera, backend, report['events']))
+        transact(
+            backend,
+            io,
+            plans,
+            folder,
+            report,
+            pending,
+            writing,
+            lambda: verify_looks(camera, backend, report['events']),
+            target_banks=target_banks,
+            target_strings=target_strings,
+        )
 
     try:
         senserShellCommand(driverName='libusb', complete=connected)

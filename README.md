@@ -4,7 +4,7 @@
 
 [详细使用说明](使用说明.md) · [配置示例](config.example.json) · [原厂恢复离线测试](factory_verification.json)
 
-![ZV-E10M2 快门声音工具 v0.3.5 界面](assets/shutter-tool-v0.3.5.jpg)
+![ZV-E10M2 快门声音工具 v0.3.6 界面](assets/shutter-tool-v0.3.6.jpg)
 
 ## 安卓测试版
 
@@ -20,7 +20,7 @@
 
 ## FL2／FL3 创意外观
 
-![FL2／FL3 外观、相机导入与图标更新界面](assets/fl2-fl3-tool-v0.3.5.jpg)
+![FL2／FL3 外观、LUT 直出与图标更新界面](assets/fl2-fl3-tool-v0.3.6.jpg)
 
 点击软件右上角「FL2／FL3 外观」可从匹配的原始备份生成两套外观文件。同一窗口也可以将已核对的两套外观导入匹配的相机。成像差分和用法见 [FL2／FL3 外观数据](filters/README.md)。
 

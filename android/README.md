@@ -1,6 +1,6 @@
 # ZV-E10 II 安卓工具
 
-公开 APK 和本地测试源码版本均为 0.2.5。最低要求 Android 8.0，快门音和图标写入需 Android 9 或更高版本。
+公开 APK 为 0.2.5，本地测试源码为 0.2.8。最低要求 Android 8.0，快门音和图标写入需 Android 9 或更高版本。
 
 [下载公开测试 APK](downloads/ZVE10-II-Android-0.2.5-public.apk)。公开包支持离线音频处理、外观文件生成和 USB 检测。服务模式、相机备份、快门音写入、外观导入和图标更新需要带本地资源的构建。
 
@@ -39,6 +39,41 @@
 0.2.2 本地测试包在「创意外观」页提供「导入 FL2／FL3 到相机」。接入相机、选择 USB 海量存储器并在手机上安全弹出 Sony U 盘。保持连接，按提示切到服务模式并再次授权。确认电量超过 50% 后，应用会检查、备份并写入匹配的相机状态。原 IN 对应 FL2，原 SH 对应 FL3。检测到已安装的两套数据时会跳过写入。安卓正式导入尚待真机验证。
 
 本地构建需用配置好的电脑版 Python 运行 `prepare_looks.py`，提供电脑版目录和新的输出目录，再将输出目录传给 `build.ps1 -CameraLooks`。同时提供 `-CustomSound` 和 `-ServiceAuth`，供相机及快门音状态校验。
+
+## 导入预制 LUT 外观
+
+0.2.6 本地包可把电脑预制的两套 LUT 外观导入原 IN／SH。电脑端沿用 Windows 0.3.6 的色调和色彩拟合流程，并为目标相机编译和离线验证写入程序。手机上按「创意外观」页显示的两套预制名称确认后，通过同一 USB 服务模式入口导入。应用只接受构建时核对过的相机状态，完成后会回读核对。重启后选 IN 和 SH 分别拍 JPEG，检查实际效果。
+
+重新预制时，先保留一次完成写入与回读的 Windows LUT 操作目录，再运行：
+
+```powershell
+python android/prepare_looks.py . android/build/my-lut --from-operation operations/<已完成操作目录> --in-cube <IN.cube> --sh-cube <SH.cube>
+```
+
+将新目录传给 `build.ps1 -CameraLut`，同时提供本地 `-ServiceAuth`。选择的文件在电脑端转换并随本地 APK 打包。Windows 和 Android 已通过离线数据对照，安卓实际写入及重启后的 JPEG 效果待真机验证。
+
+0.2.7 支持在手机上来回切换两套预制组合。构建时用 `prepare_looks.py --from-prepared` 以第一套的目标文件为起点，准备切回原组合的数据，并将该目录传给 `build.ps1 -AlternateCameraLut`。两套的起点和目标须互相匹配。连接相机后，在「创意外观」选目标套装，再点「导入外观到相机」。
+
+0.2.8 本地测试包可直接在手机上选文件。打开「创意外观」，为 IN 和 SH 各选一个纯 3D `.cube`，再点「导入外观到相机」。支持每轴 2–65 点和最大 24 MB 的文件。工具在手机端拟合相机色调曲线与色彩矩阵，回读通过后记录当前外观，可继续更换或切回预设。真机 JPEG 效果需试拍确认。
+
+本地打包时运行 `prepare_lut_templates.py`，依次传入电脑版目录、准备好的 `-CameraLut` 目录和新的模板输出目录。构建 APK 时用 `-LutTemplates` 指定该输出。模板只允许填入已验证的 12 个相机曲线窗口对应的数据。
+
+## 下载本机构建模板
+
+[下载安卓 0.2.8 模板 ZIP](downloads/ZVE10-II-Android-0.2.8-templates.zip)。模板带有 ZV-E10M2 固件 1.02 的兼容状态校验，实际写入前还会核对相机文件。若起始状态不同，需要用相机的对应备份重新生成模板。
+
+在仓库根目录解压至 `android/build/templates`，再按下面的参数构建。服务认证文件须从自己的本地环境提供。预制音频需单独用 `prepare_sound.py` 生成，并通过 `-PreparedSound` 传入。
+
+```powershell
+$templates = 'android/build/templates'
+./android/build.ps1 -JavaHome 'C:/path/to/jdk-17' `
+  -AndroidJar 'C:/path/to/android-35/android.jar' -BuildTools 'C:/path/to/build-tools/35.0.0' `
+  -ServiceAuth 'C:/local/sony-service-auth.bin' -CustomSound "$templates/custom-sound" `
+  -CameraLooks "$templates/camera-looks" -CameraLut "$templates/camera-lut" `
+  -AlternateCameraLut "$templates/camera-lut-alt" -LutTemplates "$templates/lut-templates" `
+  -CameraIcons "$templates/camera-icons" -ExtraCameraIcons "$templates/extra" `
+  -Display32CameraIcons "$templates/display32"
+```
 
 ## 更新相机左侧图标
 

@@ -24,6 +24,7 @@ final class CameraSettings {
             if (!telemetry || expected.length != other.data.length) return false;
             int at, length;
             if (key == 0x01070000 && expected.length == 8) { at = 0; length = 8; }
+            else if (key == 0x02770015 && expected.length == 4) { at = 0; length = 4; }
             else if (key == 0x02780000 && expected.length == 256) { at = 24; length = 4; }
             else return false;
             for (int i = 0; i < expected.length; i++) {

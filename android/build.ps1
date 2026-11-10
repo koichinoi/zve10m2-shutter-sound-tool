@@ -6,10 +6,13 @@ param(
     [string] $PreparedSound,
     [string] $CustomSound,
     [string] $CameraLooks,
+    [string] $CameraLut,
+    [string] $AlternateCameraLut,
+    [string] $LutTemplates,
     [string] $CameraIcons,
     [string] $ExtraCameraIcons,
     [string] $Display32CameraIcons,
-    [string] $Output = (Join-Path $PSScriptRoot 'build/ZVE10-II-Android-0.2.5.apk')
+    [string] $Output = (Join-Path $PSScriptRoot 'build/ZVE10-II-Android-0.2.8.apk')
 )
 
 $ErrorActionPreference = 'Stop'
@@ -75,6 +78,27 @@ try {
         foreach ($name in 'manifest.json', 'cp.so', 'wbi.so', 'restore.so') {
             $file = (Resolve-Path -LiteralPath (Join-Path $CameraLooks $name)).Path
             [IO.Compression.ZipFileExtensions]::CreateEntryFromFile($apk, $file, "assets/camera-looks/$name") | Out-Null
+        }
+    }
+    if ($CameraLut) {
+        if (!$ServiceAuth) { throw 'Camera LUT import requires local service authentication' }
+        foreach ($name in 'manifest.json', 'cp.so', 'wbi.so', 'restore.so') {
+            $file = (Resolve-Path -LiteralPath (Join-Path $CameraLut $name)).Path
+            [IO.Compression.ZipFileExtensions]::CreateEntryFromFile($apk, $file, "assets/camera-lut/$name") | Out-Null
+        }
+    }
+    if ($AlternateCameraLut) {
+        if (!$CameraLut) { throw 'Alternate LUT requires the primary LUT package' }
+        foreach ($name in 'manifest.json', 'cp.so', 'wbi.so', 'restore.so') {
+            $file = (Resolve-Path -LiteralPath (Join-Path $AlternateCameraLut $name)).Path
+            [IO.Compression.ZipFileExtensions]::CreateEntryFromFile($apk, $file, "assets/camera-lut-alt/$name") | Out-Null
+        }
+    }
+    if ($LutTemplates) {
+        if (!$CameraLut) { throw 'Custom LUT templates require a prepared camera LUT baseline' }
+        foreach ($name in 'manifest.json', 'cp.so', 'restore.so', 'baseline.bin') {
+            $file = (Resolve-Path -LiteralPath (Join-Path $LutTemplates $name)).Path
+            [IO.Compression.ZipFileExtensions]::CreateEntryFromFile($apk, $file, "assets/lut-templates/$name") | Out-Null
         }
     }
     if ($CameraIcons) {

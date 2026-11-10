@@ -29,6 +29,24 @@ public final class MainActivity extends Activity {
     private static final String USB_PERMISSION = "io.github.koichinoi.zve10tool.USB_PERMISSION";
     private static final int PICK_AUDIO = 1, EXPORT_AUDIO = 2, EXPORT_LOOKS = 3, EXPORT_CAMERA = 4, PICK_BACKUP = 10;
     private final Uri[] originals = new Uri[Looks.FILES.length];
+    private Spinner lutSelector;
+    private String primaryLut;
+    private String alternateLut;
+    private static final int PICK_CUBE = 20;
+    private final MobileCube[] selectedCubes = new MobileCube[2];
+    private final Button[] cubeButtons = new Button[2];
+    private final String[] cubeNames = new String[2];
+    private int customLutIndex = -1;
+
+    private boolean customLutSelected() {
+        return customLutIndex >= 0 && lutSelector.getSelectedItemPosition() == customLutIndex;
+    }
+
+    private String selectedLooksRoot() {
+        if (primaryLut == null) return MobileLooks.ROOT;
+        return alternateLut != null && lutSelector != null && lutSelector.getSelectedItemPosition() == 1
+                ? MobileLooks.ALTERNATE_LUT_ROOT : MobileLooks.LUT_ROOT;
+    }
     private final Button[] backupButtons = new Button[Looks.FILES.length];
     private TextView liveStatus;
     private final java.util.ArrayDeque<LogEntry> statusLog = new java.util.ArrayDeque<>();
@@ -74,7 +92,7 @@ public final class MainActivity extends Activity {
     private static final String ICONS_PERMISSION = USB_PERMISSION + ".ICONS";
     private enum ServiceAction {
         DETECT("相机服务模式检测", SERVICE_PERMISSION), BACKUP("备份相机文件", BACKUP_PERMISSION),
-        WRITE_TEST("测试临时写入", WRITE_TEST_PERMISSION), SOUND("写入预制快门音", SOUND_PERMISSION), CUSTOM("写入自定义快门音", CUSTOM_PERMISSION), LOOKS("导入 FL2／FL3 到相机", LOOKS_PERMISSION), ICONS("更新相机 FL2／FL3 图标", ICONS_PERMISSION);
+        WRITE_TEST("测试临时写入", WRITE_TEST_PERMISSION), SOUND("写入预制快门音", SOUND_PERMISSION), CUSTOM("写入自定义快门音", CUSTOM_PERMISSION), LOOKS("导入外观到相机", LOOKS_PERMISSION), ICONS("更新相机 FL2／FL3 图标", ICONS_PERMISSION);
         final String label, permission;
         ServiceAction(String label, String permission) {
             this.label = label;
@@ -139,7 +157,7 @@ public final class MainActivity extends Activity {
         identity.addView(nameplate, new LinearLayout.LayoutParams(0, -2, 1));
         TextView title = label(nameplate, "ZV-E10 II 相机工具", 19, true);
         title.setTextColor(Color.WHITE);
-        label(nameplate, "固件 1.02  ·  安卓 0.2.5", 12, false).setTextColor(0xffffcddd);
+        label(nameplate, "固件 1.02  ·  安卓 0.2.8", 12, false).setTextColor(0xffffcddd);
         Button history = new Button(this, null, android.R.attr.borderlessButtonStyle);
         history.setText("日志");
         history.setMinWidth(0);
@@ -242,8 +260,39 @@ public final class MainActivity extends Activity {
                 export("application/zip", "ZVE10M2-" + lookLabel() + ".zip", EXPORT_LOOKS));
 
         if (MobileLooks.available(this)) {
-            button(page, "导入 FL2／FL3 到相机", view -> checkService(true, ServiceAction.LOOKS));
-            label(page, "导入时会备份相机，并一起更新原 IN／SH 的成像效果。", 13, false);
+            primaryLut = MobileLooks.lutLabels(this, MobileLooks.LUT_ROOT);
+            alternateLut = MobileLooks.lutLabels(this, MobileLooks.ALTERNATE_LUT_ROOT);
+            boolean customLut = primaryLut != null && DynamicLooks.available(this);
+            if (primaryLut != null && (alternateLut != null || customLut)) {
+                label(page, "选择要切换的 LUT 套装", 14, true);
+                lutSelector = new Spinner(this);
+                java.util.ArrayList<String> choices = new java.util.ArrayList<>();
+                choices.add("套装 A");
+                if (alternateLut != null) choices.add("套装 B");
+                if (customLut) {
+                    customLutIndex = choices.size();
+                    choices.add("自选 .cube");
+                }
+                ArrayAdapter<String> lutOptions = new ArrayAdapter<>(this,
+                        android.R.layout.simple_spinner_item, choices);
+                lutOptions.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+                lutSelector.setAdapter(lutOptions);
+                page.addView(lutSelector);
+                label(page, "套装 A\n" + primaryLut
+                        + (alternateLut == null ? "" : "\n\n套装 B\n" + alternateLut), 13, false);
+            } else if (primaryLut != null) {
+                label(page, "本地预制 LUT 外观\n" + primaryLut, 13, false);
+            }
+            if (customLut) {
+                for (int i = 0; i < cubeButtons.length; i++) {
+                    int slot = i;
+                    cubeButtons[i] = button(page, i == 0 ? "为 IN 选择 .cube" : "为 SH 选择 .cube",
+                            view -> pick("*/*", PICK_CUBE + slot));
+                }
+                label(page, "支持每轴 2–65 点的纯 3D .cube。两槽都选好后可直接导入。", 13, false);
+            }
+            button(page, ServiceAction.LOOKS.label, view -> checkService(true, ServiceAction.LOOKS));
+            label(page, "导入前会备份并核对当前相机状态。", 13, false);
         }
 
         if (MobileIcons.available(this)) {
@@ -275,6 +324,11 @@ public final class MainActivity extends Activity {
 
     private void checkService(boolean ask, ServiceAction action) {
         if (usb == null || checkingUsb || working) return;
+        if (action == ServiceAction.LOOKS && customLutSelected()
+                && (selectedCubes[0] == null || selectedCubes[1] == null)) {
+            setStatus(Area.LOOKS, "请为 IN 和 SH 各选一个有效的 .cube 文件。");
+            return;
+        }
         if (action == ServiceAction.CUSTOM) {
             if (audioOutput == null) {
                 setStatus(Area.SERVICE, "请先选择并生成快门音。");
@@ -316,7 +370,10 @@ public final class MainActivity extends Activity {
                     new AlertDialog.Builder(this).setTitle(action.label)
                             .setMessage(action == ServiceAction.ICONS
                                     ? "将备份相机的图标资源，再更新左侧 IN／SH 图标。请保持数据线连接。"
-                                    : "将先核对相机状态并备份，再替换原 IN／SH 的成像数据。请保持数据线连接。")
+                                    : "将先核对相机状态并备份，再替换原 IN／SH 的成像数据。请保持数据线连接。"
+                                    + (primaryLut == null ? "" : "\n\n" + (customLutSelected()
+                                            ? "IN · " + cubeNames[0] + "\nSH · " + cubeNames[1]
+                                            : selectedLooksRoot().equals(MobileLooks.LUT_ROOT) ? primaryLut : alternateLut)))
                             .setNegativeButton("取消", null)
                             .setPositiveButton("电量超过 50%，继续", (dialog, button) -> runService(selected, false, action))
                             .show();
@@ -375,6 +432,8 @@ public final class MainActivity extends Activity {
             return;
         }
         checkingUsb = true;
+        String looksRoot = selectedLooksRoot();
+        MobileCube[] cubes = action == ServiceAction.LOOKS && customLutSelected() ? selectedCubes.clone() : null;
         refresh();
         if ((backup || sound || action == ServiceAction.LOOKS || action == ServiceAction.ICONS) && !switching) {
             getWindow().addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
@@ -425,9 +484,9 @@ public final class MainActivity extends Activity {
                                 message = installed ? "图标更新和回读通过，请重启相机查看左侧列表。"
                                         : "相机图标已是 FL2／FL3，已跳过写入。";
                             } else if (action == ServiceAction.LOOKS) {
-                                boolean installed = MobileLooks.install(this, service, progress);
-                                message = installed ? "FL2／FL3 导入和回读通过，请重启相机检查原 IN／SH。"
-                                        : "相机已安装 FL2／FL3，已核对并跳过写入。";
+                                boolean installed = MobileLooks.install(this, service, looksRoot, cubes, progress);
+                                message = installed ? "外观导入和回读通过，请重启相机并在 IN／SH 试拍 JPEG。"
+                                        : "相机已安装所选外观，已核对并跳过写入。";
                             } else if (sound) {
                                 completedBackup = MobileSound.install(this, service, customWav, progress);
                                 message = "快门音写入和回读通过。拔线，关机等读写灯熄灭，取出电池一分钟，再开机试听。";
@@ -625,6 +684,34 @@ public final class MainActivity extends Activity {
             audioOutput = null;
             stopPreview();
             setStatus(Area.AUDIO, "已选择音频，可以生成。");
+        } else if (request >= PICK_CUBE && request < PICK_CUBE + selectedCubes.length
+                && cubeButtons[request - PICK_CUBE] != null) {
+            int slot = request - PICK_CUBE;
+            String label = slot == 0 ? "IN" : "SH";
+            selectedCubes[slot] = null;
+            cubeNames[slot] = null;
+            cubeButtons[slot].setText("为 " + label + " 选择 .cube");
+            runTask(Area.LOOKS, () -> {
+                String name = label + ".cube";
+                try (android.database.Cursor cursor = getContentResolver().query(uri,
+                        new String[]{android.provider.OpenableColumns.DISPLAY_NAME}, null, null, null)) {
+                    if (cursor != null && cursor.moveToFirst() && cursor.getString(0) != null)
+                        name = cursor.getString(0);
+                }
+                MobileCube cube;
+                try (InputStream input = getContentResolver().openInputStream(uri)) {
+                    if (input == null) throw new IOException("无法打开 LUT 文件");
+                    cube = MobileCube.read(input);
+                }
+                String filename = name;
+                return () -> {
+                    selectedCubes[slot] = cube;
+                    cubeNames[slot] = filename;
+                    cubeButtons[slot].setText(label + " · " + filename);
+                    lutSelector.setSelection(customLutIndex);
+                    setStatus(Area.LOOKS, label + " 的 LUT 已校验。");
+                };
+            });
         } else if (request >= PICK_BACKUP && request < PICK_BACKUP + originals.length) {
             int index = request - PICK_BACKUP;
             originals[index] = uri;
@@ -681,6 +768,8 @@ public final class MainActivity extends Activity {
         volume.setEnabled(!working && !checkingUsb);
         writeCustom.setEnabled(!working && !checkingUsb && audioOutput != null);
         looks.setEnabled(!working);
+        if (lutSelector != null) lutSelector.setEnabled(!working && !checkingUsb);
+        for (Button button : cubeButtons) if (button != null) button.setEnabled(!working && !checkingUsb);
         for (Button button : backupButtons) button.setEnabled(!working);
         preview.setEnabled(!working && audioOutput != null);
         saveAudio.setEnabled(!working && audioOutput != null);

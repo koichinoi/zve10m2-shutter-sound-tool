@@ -12,60 +12,99 @@ import org.json.*;
 
 final class MobileLooks {
     static final String ROOT = "camera-looks/";
+    static final String LUT_ROOT = "camera-lut/";
+    static final String ALTERNATE_LUT_ROOT = "camera-lut-alt/";
     private static final String APP = "/usr/lib/appFw.so", CP = "/cp/cpapp-b.bin";
     private static final String LOADER = "/tmp/jiritsu/libJit.so";
     static final String PENDING = "mobile-looks.pending";
 
     static boolean available(Context context) {
-        try (InputStream input = context.getAssets().open(ROOT + "manifest.json")) { return true; }
+        return available(context, ROOT) || available(context, LUT_ROOT);
+    }
+
+    private static boolean available(Context context, String root) {
+        try (InputStream input = context.getAssets().open(root + "manifest.json")) { return true; }
         catch (IOException missing) { return false; }
     }
 
-    static boolean install(Context context, SonyService usb, Consumer<String> progress) throws Exception {
+    static String lutLabels(Context context, String root) {
+        if (!available(context, root)) return null;
+        try {
+            JSONArray labels = config(context, root, 65536).getJSONArray("lut_labels");
+            return "IN · " + labels.getString(0) + "\nSH · " + labels.getString(1);
+        } catch (Exception invalid) { return "LUT 资源无法读取"; }
+    }
+
+    static boolean install(Context context, SonyService usb, String root, MobileCube[] cubes,
+                           Consumer<String> progress) throws Exception {
         File pending = new File(context.getFilesDir(), PENDING);
         if (pending.exists() || new File(context.getFilesDir(), "mobile-sound.pending").exists()
                 || new File(context.getFilesDir(), MobileIcons.PENDING).exists())
             throw new IOException("有未确认的相机写入，请保留应用数据");
-        JSONObject config = config(context, ROOT, 65536);
+        JSONObject config = config(context, root, 65536);
         JSONArray components = config.getJSONArray("components");
         JSONObject cpPlan = components.getJSONObject(0);
         Observation first = observe(usb, progress);
-        String currentCp = hashFile(usb, CP, cpPlan.getInt("bytes"));
+        boolean dynamic = !root.equals(ROOT) && DynamicLooks.available(context);
+        if (cubes != null && !dynamic) throw new IOException("此 APK 缺少自选 LUT 模板");
+        byte[] liveCp = dynamic ? usb.readSmall(CP, cpPlan.getInt("bytes"), false) : null;
+        byte[][] prepared = dynamic ? DynamicLooks.prepare(context, config, liveCp, first.units, cubes) : null;
+        String currentCp = dynamic ? cpPlan.getString("source_sha256") : hashFile(usb, CP, cpPlan.getInt("bytes"));
         if (currentCp.equals(cpPlan.getString("candidate_sha256")) && first.isTarget(components)) return false;
         if (!currentCp.equals(cpPlan.getString("source_sha256")))
-            throw new IOException("相机外观程序不是匹配的原始状态");
+            throw new IOException("相机当前外观与这套切换方案的起始状态不匹配");
         first.ram.verifySaveScope(first.stored);
         List<Fragment> edits = new ArrayList<>();
         byte[][] targets = buildTargets(components, first.units, edits);
 
-        JSONObject sound = config(context, CustomSound.ROOT, 8192);
         File folder = new File(context.getFilesDir(), "looks-" + UUID.randomUUID());
         if (!folder.mkdir()) throw new IOException("无法创建备份目录");
         File backup = new File(folder, "camera-backup.zip");
         CameraBackup.create(usb, backup, progress);
         Map<String, String> protectedHashes = new LinkedHashMap<>();
         Map<String, Integer> protectedSizes = new LinkedHashMap<>();
-        JSONObject pins = sound.getJSONObject("pins");
         try (ZipFile zip = new ZipFile(backup)) {
             if (!currentCp.equals(hashEntry(zip, CP))) throw new IOException("相机外观程序发生变化");
-            String app = hashEntry(zip, APP);
-            JSONObject currentSound = CustomSound.findState(context, sound.getJSONArray("known"), app);
-            protectedHashes.put(APP, app);
-            protectedSizes.put(APP, 93620512);
-            for (Iterator<String> it = pins.keys(); it.hasNext();) {
-                String path = it.next();
-                if (path.equals(CP)) continue;
-                JSONArray pin = pins.getJSONArray(path);
-                if (!pin.getString(1).equals(hashEntry(zip, path))) throw new IOException("保护文件不匹配 " + path);
-                protectedHashes.put(path, pin.getString(1));
-                protectedSizes.put(path, pin.getInt(0));
+            if (config.has("protected")) {
+                JSONObject pins = config.getJSONObject("protected");
+                if (!pins.has(APP)) throw new IOException("LUT 资源缺少保护文件记录");
+                for (Iterator<String> it = pins.keys(); it.hasNext();) {
+                    String path = it.next();
+                    JSONArray pin = pins.getJSONArray(path);
+                    int length = pin.getInt(0);
+                    String expected = pin.getString(1);
+                    if (zip.getEntry(path.substring(1)) != null) {
+                        if (!expected.equals(hashEntry(zip, path))) throw new IOException("保护文件不匹配 " + path);
+                    } else {
+                        byte[] data = usb.readSmall(path, length, false);
+                        MobileSound.checkHash(data, expected, path);
+                        persist(new File(folder, new File(path).getName()), data);
+                    }
+                    protectedHashes.put(path, expected);
+                    protectedSizes.put(path, length);
+                }
+            } else {
+                JSONObject sound = config(context, CustomSound.ROOT, 8192);
+                JSONObject pins = sound.getJSONObject("pins");
+                String app = hashEntry(zip, APP);
+                JSONObject currentSound = CustomSound.findState(context, sound.getJSONArray("known"), app);
+                protectedHashes.put(APP, app);
+                protectedSizes.put(APP, 93620512);
+                for (Iterator<String> it = pins.keys(); it.hasNext();) {
+                    String path = it.next();
+                    if (path.equals(CP)) continue;
+                    JSONArray pin = pins.getJSONArray(path);
+                    if (!pin.getString(1).equals(hashEntry(zip, path))) throw new IOException("保护文件不匹配 " + path);
+                    protectedHashes.put(path, pin.getString(1));
+                    protectedSizes.put(path, pin.getInt(0));
+                }
+                String audio = currentSound.getString("audio");
+                byte[] oldAudio = usb.readSmall(audio, 16384, false);
+                MobileSound.checkHash(oldAudio, currentSound.getString("hash"), "当前快门音");
+                protectedHashes.put(audio, currentSound.getString("hash"));
+                protectedSizes.put(audio, oldAudio.length);
+                persist(new File(folder, "current-audio.bin"), oldAudio);
             }
-            String audio = currentSound.getString("audio");
-            byte[] oldAudio = usb.readSmall(audio, 16384, false);
-            MobileSound.checkHash(oldAudio, currentSound.getString("hash"), "当前快门音");
-            protectedHashes.put(audio, currentSound.getString("hash"));
-            protectedSizes.put(audio, oldAudio.length);
-            persist(new File(folder, "current-audio.bin"), oldAudio);
         }
         JSONArray transport = config.getJSONArray("transport");
         for (int i = 0; i < transport.length(); i++) {
@@ -78,9 +117,9 @@ final class MobileLooks {
             persist(new File(folder, new File(path).getName()), data);
         }
         JSONObject workers = config.getJSONObject("workers");
-        Worker wbi = new Worker(context, workers, "wbi");
-        Worker cp = new Worker(context, workers, "cp");
-        byte[] inverse = MobileSound.asset(context, ROOT, "restore.so", 65536);
+        Worker wbi = new Worker(context, root, workers, "wbi", null);
+        Worker cp = new Worker(context, root, workers, "cp", dynamic ? prepared[0] : null);
+        byte[] inverse = dynamic ? prepared[1] : MobileSound.asset(context, root, "restore.so", 65536);
         MobileSound.checkHash(inverse, config.getString("restore_hash"), "外观恢复程序");
         byte[] preload = usb.readSmall("/etc/ld.so.preload", 4096, true);
         if (preload != null && preload.length != 0) throw new IOException("检测到其他启动修改");
@@ -90,6 +129,11 @@ final class MobileLooks {
         Observation before = observe(usb, progress);
         first.compare(before, null, false);
         before.ram.verifySaveScope(before.stored);
+        for (Fragment edit : edits) {
+            byte[] expected = Arrays.copyOfRange(before.units[edit.unit], edit.offset, edit.offset + edit.data.length);
+            if (!Arrays.equals(expected, usb.adjust(edit.command(false), edit.data.length)))
+                throw new IOException("色彩分段读取不匹配");
+        }
         persist(new File(folder, "ram.bin"), before.ramBytes);
         persist(new File(folder, "stored.bin"), before.storedBytes);
         persist(new File(folder, "restore.so"), inverse);
@@ -107,11 +151,6 @@ final class MobileLooks {
             throw new IOException("外观程序回读不匹配");
         before.compare(observe(usb, progress), null, false);
 
-        for (Fragment edit : edits) {
-            byte[] expected = Arrays.copyOfRange(before.units[edit.unit], edit.offset, edit.offset + edit.data.length);
-            if (!Arrays.equals(expected, usb.adjust(edit.command(false), edit.data.length)))
-                throw new IOException("色彩分段读取不匹配");
-        }
         byte[][] current = {before.units[0].clone(), before.units[1].clone()};
         for (int i = 0; i < edits.size(); i++) {
             Fragment edit = edits.get(i);
@@ -134,6 +173,7 @@ final class MobileLooks {
             if (!item.getValue().equals(hashFile(usb, item.getKey(), protectedSizes.get(item.getKey()))))
                 throw new IOException("保护文件回读失败 " + item.getKey());
         }
+        if (dynamic) DynamicLooks.record(context, components);
         if (!pending.delete()) throw new IOException("导入已核对，但未能清除本地记录");
         return true;
     }
@@ -247,14 +287,14 @@ final class MobileLooks {
     private static final class Worker {
         final String name, stage, result;
         final byte[] data;
-        Worker(Context context, JSONObject workers, String name) throws Exception {
+        Worker(Context context, String root, JSONObject workers, String name, byte[] prepared) throws Exception {
             this.name = name;
             JSONObject info = workers.getJSONObject(name);
             stage = info.getString("stage"); result = info.getString("result");
             if (!stage.matches("/tmp/jiritsu/zve10m2\\.[a-z0-9]+\\.(stage|staged)\\.so")
                     || !result.matches("/tmp/jiritsu/zve10m2\\.[a-z0-9]+\\.result"))
                 throw new IOException("相机辅助路径不匹配");
-            data = MobileSound.asset(context, ROOT, name + ".so", 65536);
+            data = prepared == null ? MobileSound.asset(context, root, name + ".so", 65536) : prepared;
             MobileSound.checkHash(data, info.getString("sha256"), "外观辅助程序");
         }
     }
@@ -268,6 +308,7 @@ final class MobileLooks {
         verifyWorker(worker.name, report);
         usb.removeHelper(worker.stage, worker.data);
         usb.removeHelper(LOADER, worker.data);
+        usb.removeHelper(worker.result, report);
     }
 
     static void verifyWorker(String name, byte[] report) throws IOException {
@@ -314,7 +355,7 @@ final class MobileLooks {
         return true;
     }
 
-    private static byte[] decode(String hex) throws IOException {
+    static byte[] decode(String hex) throws IOException {
         if ((hex.length() & 1) != 0) throw new IOException("外观数据编码无效");
         byte[] data = new byte[hex.length() / 2];
         for (int i = 0; i < data.length; i++) data[i] = (byte) Integer.parseInt(hex.substring(i * 2, i * 2 + 2), 16);

@@ -9,11 +9,11 @@ param(
     [string] $CameraLut,
     [string] $AlternateCameraLut,
     [string] $LutTemplates,
-    [string] $BuiltInLuts,
+    [string] $BuiltInLuts = (Join-Path $PSScriptRoot 'luts'),
     [string] $CameraIcons,
     [string] $ExtraCameraIcons,
     [string] $Display32CameraIcons,
-    [string] $Output = (Join-Path $PSScriptRoot 'build/ZVE10-II-Android-0.2.9.apk')
+    [string] $Output = (Join-Path $PSScriptRoot 'build/ZVE10-II-Android-0.2.10.apk')
 )
 
 $ErrorActionPreference = 'Stop'
@@ -103,7 +103,6 @@ try {
         }
     }
     if ($BuiltInLuts) {
-        if (!$LutTemplates) { throw 'Built-in LUT selection requires the custom LUT templates' }
         $lutFiles = @(Get-ChildItem -LiteralPath $BuiltInLuts -Filter '*.cube' -File -Recurse | Sort-Object Name, FullName)
         if (!$lutFiles.Count) { throw 'No .cube files found in the LUT library' }
         $catalog = for ($i = 0; $i -lt $lutFiles.Count; $i++) {

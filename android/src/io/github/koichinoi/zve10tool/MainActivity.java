@@ -36,6 +36,9 @@ public final class MainActivity extends Activity {
     private String primaryLut;
     private String alternateLut;
     private static final int PICK_CUBE = 20;
+    private static final int EXPORT_CUBE = 22;
+    private JSONArray builtinLuts;
+    private String pendingCubeExport;
     private final MobileCube[] selectedCubes = new MobileCube[2];
     private final Button[] cubeButtons = new Button[2];
     private final String[] cubeNames = new String[2];
@@ -118,6 +121,7 @@ public final class MainActivity extends Activity {
 
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
+        if (state != null) pendingCubeExport = state.getString("cubeExport");
         usb = getSystemService(UsbManager.class);
         IntentFilter filter = new IntentFilter(USB_PERMISSION);
         filter.addAction(SERVICE_PERMISSION);
@@ -160,7 +164,7 @@ public final class MainActivity extends Activity {
         identity.addView(nameplate, new LinearLayout.LayoutParams(0, -2, 1));
         TextView title = label(nameplate, "ZV-E10 II 相机工具", 19, true);
         title.setTextColor(Color.WHITE);
-        label(nameplate, "固件 1.02  ·  安卓 0.2.9", 12, false).setTextColor(0xffffcddd);
+        label(nameplate, "固件 1.02  ·  安卓 0.2.10", 12, false).setTextColor(0xffffcddd);
         Button history = new Button(this, null, android.R.attr.borderlessButtonStyle);
         history.setText("日志");
         history.setMinWidth(0);
@@ -239,6 +243,10 @@ public final class MainActivity extends Activity {
 
         page = card(screen(content, 1));
         section(page, "FL2／FL3 创意外观");
+        builtinLuts = readBuiltinLuts();
+        if (builtinLuts.length() > 0) {
+            button(page, "浏览／导出内置 LUT（" + builtinLuts.length() + " 款）", view -> showCubeLibrary());
+        }
         label(page, "选择三份匹配的原始备份，校验后生成外观 ZIP。", 14, false);
         for (int i = 0; i < originals.length; i++) {
             int slot = i;
@@ -678,29 +686,48 @@ public final class MainActivity extends Activity {
         startActivityForResult(intent, request);
     }
 
-    private void chooseCube(int slot) {
-        JSONArray catalog;
+    private JSONArray readBuiltinLuts() {
         try {
             byte[] bytes = MobileSound.asset(this, "builtin-luts/", "catalog.json", 65536);
-            catalog = new JSONArray(new String(bytes, StandardCharsets.UTF_8));
-        } catch (FileNotFoundException absent) {
-            pick("*/*", PICK_CUBE + slot);
-            return;
+            JSONArray catalog = new JSONArray(new String(bytes, StandardCharsets.UTF_8));
+            for (int i = 0; i < catalog.length(); i++) {
+                JSONObject entry = catalog.getJSONObject(i);
+                if (entry.getString("name").isEmpty() || !entry.getString("file").matches("[0-9]+\\.cube"))
+                    return new JSONArray();
+            }
+            return catalog;
         } catch (Exception invalid) {
-            setStatus(Area.LOOKS, "内置 LUT 列表无法读取，已打开手机文件选择。");
+            return new JSONArray();
+        }
+    }
+
+    private void showCubeLibrary() {
+        if (working || checkingUsb) return;
+        String[] names = new String[builtinLuts.length()];
+        for (int i = 0; i < names.length; i++) names[i] = builtinLuts.optJSONObject(i).optString("name");
+        new AlertDialog.Builder(this).setTitle("内置 LUT · 点选即可导出")
+                .setItems(names, (dialog, index) -> {
+                    pendingCubeExport = builtinLuts.optJSONObject(index).optString("file");
+                    export("application/octet-stream", names[index] + ".cube", EXPORT_CUBE);
+                }).setNegativeButton("取消", null).show();
+    }
+
+    private void chooseCube(int slot) {
+        if (working || checkingUsb) return;
+        if (builtinLuts.length() == 0) {
             pick("*/*", PICK_CUBE + slot);
             return;
         }
-        String[] names = new String[catalog.length() + 1];
+        String[] names = new String[builtinLuts.length() + 1];
         names[0] = "从手机选择 .cube 文件";
-        for (int i = 0; i < catalog.length(); i++) names[i + 1] = catalog.optJSONObject(i).optString("name");
+        for (int i = 0; i < builtinLuts.length(); i++) names[i + 1] = builtinLuts.optJSONObject(i).optString("name");
         new AlertDialog.Builder(this).setTitle(slot == 0 ? "为 IN 选择 LUT" : "为 SH 选择 LUT")
                 .setItems(names, (dialog, index) -> {
                     if (index == 0) {
                         pick("*/*", PICK_CUBE + slot);
                         return;
                     }
-                    JSONObject entry = catalog.optJSONObject(index - 1);
+                    JSONObject entry = builtinLuts.optJSONObject(index - 1);
                     String file = entry.optString("file");
                     if (file.matches("[0-9]+\\.cube")) loadCube(slot, null, file, names[index]);
                 }).setNegativeButton("取消", null).show();
@@ -739,6 +766,21 @@ public final class MainActivity extends Activity {
 
     @Override protected void onActivityResult(int request, int result, Intent data) {
         super.onActivityResult(request, result, data);
+        if (request == EXPORT_CUBE) {
+            String filename = pendingCubeExport;
+            pendingCubeExport = null;
+            if (result == RESULT_OK && data != null && data.getData() != null
+                    && filename != null && filename.matches("[0-9]+\\.cube")) {
+                Uri target = data.getData();
+                runTask(Area.LOOKS, () -> {
+                    try (InputStream input = getAssets().open("builtin-luts/" + filename)) {
+                        copyExport(input, target);
+                    }
+                    return () -> setStatus(Area.LOOKS, "LUT 已导出。");
+                });
+            }
+            return;
+        }
         if (result != RESULT_OK || data == null || data.getData() == null) return;
         Uri uri = data.getData();
         if (request == PICK_AUDIO) {
@@ -763,17 +805,22 @@ public final class MainActivity extends Activity {
                 return;
             }
             runTask(status, () -> {
-                try (InputStream input = new FileInputStream(file);
-                     OutputStream output = getContentResolver().openOutputStream(uri, "wt")) {
-                    if (output == null) throw new IOException("无法打开导出文件");
-                    byte[] bytes = new byte[16384];
-                    int size;
-                    while ((size = input.read(bytes)) != -1) output.write(bytes, 0, size);
+                try (InputStream input = new FileInputStream(file)) {
+                    copyExport(input, uri);
                 }
                 return () -> setStatus(status, "导出完成。");
             });
         }
         refresh();
+    }
+
+    private void copyExport(InputStream input, Uri target) throws IOException {
+        try (OutputStream output = getContentResolver().openOutputStream(target, "wt")) {
+            if (output == null) throw new IOException("无法打开导出文件");
+            byte[] bytes = new byte[16384];
+            int size;
+            while ((size = input.read(bytes)) != -1) output.write(bytes, 0, size);
+        }
     }
 
     private interface Task { Runnable run() throws Exception; }
@@ -1021,6 +1068,7 @@ public final class MainActivity extends Activity {
 
     @Override protected void onSaveInstanceState(Bundle state) {
         state.putInt("activeTab", activeTab);
+        state.putString("cubeExport", pendingCubeExport);
         super.onSaveInstanceState(state);
     }
 
